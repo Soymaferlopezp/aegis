@@ -1,0 +1,10 @@
+{
+  "network": "arcTestnet",
+  "updatedAt": "2026-01-11T01:52:46.208Z",
+  "helloAegis": {
+    "address": "0x98b39F3D282AB6026073314AE54ab907EB32A1C7",
+    "deployer": "0x90B3EA700173274560182CbF76ED8E6E66Ad2494",
+    "deployTx": "0xb123ab2e3f061b9893e16370a34bd582ec8c4362906c5e4fc1557b142330d242",
+    "explorer": "https://testnet.arcscan.app"
+  }
+}
