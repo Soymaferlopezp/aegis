@@ -7,7 +7,10 @@
     "test": "hardhat test",
     "arc:console": "hardhat console --network arcTestnet",
     "arc:deploy:hello": "hardhat run --network arcTestnet scripts/deploy-hello.ts",
-    "arc:smoke:hello": "hardhat run --network arcTestnet scripts/smoke-hello.ts"
+    "arc:smoke:hello": "hardhat run --network arcTestnet scripts/smoke-hello.ts",
+    "arc:deploy:vault": "hardhat run scripts/deploy-vault.ts --network arcTestnet",
+    "arc:smoke:vault": "hardhat run scripts/smoke-vault.ts --network arcTestnet",
+    "arc:smoke:vault:spend": "hardhat run scripts/smoke-vault-spend.ts --network arcTestnet"
   },
   "devDependencies": {
     "@nomicfoundation/hardhat-toolbox": "^5.0.0",
