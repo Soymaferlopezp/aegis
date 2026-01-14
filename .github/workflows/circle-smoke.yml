@@ -24,5 +24,5 @@ jobs:
         run: |
           npm ci || npm install
 
-      - name: Smoke - entity public key
-        run: npx ts-node scripts/circle/00_publicKey.ts
+      - name: Create WalletSet
+        run: npx ts-node scripts/circle/01_createWalletSet.ts
