@@ -1,0 +1,23 @@
+name: circle-w3s-wait-tx
+
+on:
+  workflow_dispatch:
+
+jobs:
+  wait:
+    runs-on: ubuntu-latest
+    env:
+      CIRCLE_API_KEY: ${{ secrets.CIRCLE_API_KEY }}
+      CIRCLE_BASE_URL: "https://api.circle.com/v1/w3s"
+      CIRCLE_TX_ID: ${{ secrets.CIRCLE_TX_ID }}
+      ARC_EXPLORER_TX: "https://testnet.arcscan.app/tx/"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Install deps
+        run: |
+          npm ci || npm install
+      - name: Wait tx -> txHash -> Arcscan
+        run: npx ts-node scripts/circle/06_waitTx.ts
