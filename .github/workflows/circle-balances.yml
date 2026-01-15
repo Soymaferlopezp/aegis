@@ -1,0 +1,22 @@
+name: circle-w3s-balances
+
+on:
+  workflow_dispatch:
+
+jobs:
+  balances:
+    runs-on: ubuntu-latest
+    env:
+      CIRCLE_API_KEY: ${{ secrets.CIRCLE_API_KEY }}
+      CIRCLE_BASE_URL: "https://api.circle.com/v1/w3s"
+      CIRCLE_WALLET_ID_AGENT: ${{ secrets.CIRCLE_WALLET_ID_AGENT }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Install deps
+        run: |
+          npm ci || npm install
+      - name: Get balances (agent)
+        run: npx ts-node scripts/circle/04_getBalances.ts
