@@ -1,0 +1,23 @@
+name: vault-set-agent-executor
+
+on:
+  workflow_dispatch:
+
+jobs:
+  set_agent:
+    runs-on: ubuntu-latest
+    env:
+      ARC_TESTNET_RPC_PRIMARY: "https://rpc.testnet.arc.network"
+      VAULT_ADDRESS: "0x3fFd55E53D7740a93b8B62e93ed11a2c0651098E"
+      OWNER_PRIVATE_KEY: ${{ secrets.OWNER_PRIVATE_KEY }}
+      CIRCLE_WALLET_ADDRESS_AGENT: ${{ secrets.CIRCLE_WALLET_ADDRESS_AGENT }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Install deps
+        run: |
+          npm ci || npm install
+      - name: Set agentExecutor = Circle agent wallet
+        run: npx hardhat run scripts/vault/01_setAgentExecutor_circle.ts
