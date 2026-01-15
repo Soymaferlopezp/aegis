@@ -11,8 +11,8 @@ jobs:
       CIRCLE_ENTITY_SECRET_HEX: ${{ secrets.CIRCLE_ENTITY_SECRET_HEX }}
       CIRCLE_BASE_URL: "https://api.circle.com/v1/w3s"
       CIRCLE_BLOCKCHAIN: "ARC"
-      VAULT_ADDRESS: "0x3fFd55E53D7740a93b8B62e93ed11a2c0651098E"
       ARC_EXPLORER_TX: "https://testnet.arcscan.app/tx/"
+      VAULT_ADDRESS: "0x3fFd55E53D7740a93b8B62e93ed11a2c0651098E"
     steps:
       - uses: actions/checkout@v4
 
@@ -23,6 +23,9 @@ jobs:
       - name: Install deps
         run: |
           npm ci || npm install
+
+      - name: Create WalletSet
+        run: npx ts-node scripts/circle/01_createWalletSet.ts
 
       - name: Create Wallets (ARC) - agent + receiver
         run: npx ts-node scripts/circle/02_createWallets_arc.ts
