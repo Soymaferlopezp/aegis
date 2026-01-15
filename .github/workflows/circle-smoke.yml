@@ -24,5 +24,6 @@ jobs:
         run: |
           npm ci || npm install
 
-      - name: Print Entity Secret Ciphertext (for Console bootstrap)
-        run: npx ts-node scripts/circle/00c_printEntityCiphertext.ts
+      - name: Create WalletSet
+        run: npx ts-node scripts/circle/01_createWalletSet.ts
+
