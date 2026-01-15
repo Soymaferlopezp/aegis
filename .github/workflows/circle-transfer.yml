@@ -1,0 +1,26 @@
+name: circle-w3s-transfer-usdc
+
+on:
+  workflow_dispatch:
+
+jobs:
+  transfer:
+    runs-on: ubuntu-latest
+    env:
+      CIRCLE_API_KEY: ${{ secrets.CIRCLE_API_KEY }}
+      CIRCLE_ENTITY_SECRET_HEX: ${{ secrets.CIRCLE_ENTITY_SECRET_HEX }}
+      CIRCLE_BASE_URL: "https://api.circle.com/v1/w3s"
+      CIRCLE_WALLET_ID_AGENT: ${{ secrets.CIRCLE_WALLET_ID_AGENT }}
+      DESTINATION_ADDRESS: ${{ secrets.DESTINATION_ADDRESS }}
+      TOKEN_ID_USDC: ${{ secrets.TOKEN_ID_USDC }}
+      ARC_EXPLORER_TX: "https://testnet.arcscan.app/tx/"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Install deps
+        run: |
+          npm ci || npm install
+      - name: Transfer USDC
+        run: npx ts-node scripts/circle/05_transfer_usdc.ts
