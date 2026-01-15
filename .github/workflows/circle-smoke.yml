@@ -11,7 +11,7 @@ jobs:
       CIRCLE_ENTITY_SECRET_HEX: ${{ secrets.CIRCLE_ENTITY_SECRET_HEX }}
       CIRCLE_WALLET_SET_ID: ${{ secrets.CIRCLE_WALLET_SET_ID }}
       CIRCLE_BASE_URL: "https://api.circle.com/v1/w3s"
-      CIRCLE_BLOCKCHAIN: "ARC"
+      CIRCLE_BLOCKCHAIN: "ARC-TESTNET"
       ARC_EXPLORER_TX: "https://testnet.arcscan.app/tx/"
       VAULT_ADDRESS: "0x3fFd55E53D7740a93b8B62e93ed11a2c0651098E"
     steps:
