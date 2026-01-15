@@ -13,7 +13,7 @@ async function main() {
   const destinationAddress = mustEnv("DESTINATION_ADDRESS");
   const tokenId = mustEnv("TOKEN_ID_USDC");
 
-  const amount = "0.01"; // ajusta si el faucet da menos/más
+  const amount = "1"; // ajusta si el faucet da menos/más
 
   const entitySecretHex = mustEnv("CIRCLE_ENTITY_SECRET_HEX");
   const publicKey = await getEntityPublicKey();
