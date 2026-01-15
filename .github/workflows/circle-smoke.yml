@@ -24,6 +24,5 @@ jobs:
         run: |
           npm ci || npm install
 
-      - name: Create WalletSet
-        run: npx ts-node scripts/circle/01_createWalletSet.ts
-
+      - name: Create Wallets (ARC) - agent + receiver
+        run: npx ts-node scripts/circle/02_createWallets_arc.ts
