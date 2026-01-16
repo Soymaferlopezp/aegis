@@ -1,0 +1,21 @@
+name: vault-read-state
+
+on:
+  workflow_dispatch:
+
+jobs:
+  read:
+    runs-on: ubuntu-latest
+    env:
+      ARC_TESTNET_RPC_PRIMARY: "https://rpc.testnet.arc.network"
+      VAULT_ADDRESS: "0x3fFd55E53D7740a93b8B62e93ed11a2c0651098E"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Install deps
+        run: |
+          npm ci || npm install
+      - name: Read vault state
+        run: node -e "console.log('node ok')" && npx ts-node scripts/vault/00_readVaultState.ts
