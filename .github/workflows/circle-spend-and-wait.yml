@@ -1,0 +1,50 @@
+name: circle-w3s-spend-and-wait
+
+on:
+  workflow_dispatch:
+
+jobs:
+  spend_and_wait:
+    runs-on: ubuntu-latest
+    env:
+      CIRCLE_API_KEY: ${{ secrets.CIRCLE_API_KEY }}
+      CIRCLE_ENTITY_SECRET_HEX: ${{ secrets.CIRCLE_ENTITY_SECRET_HEX }}
+      CIRCLE_BASE_URL: "https://api.circle.com/v1/w3s"
+      CIRCLE_BLOCKCHAIN: "ARC-TESTNET"
+
+      CIRCLE_WALLET_ID_AGENT: ${{ secrets.CIRCLE_WALLET_ID_AGENT }}
+      VAULT_ADDRESS: "0x3fFd55E53D7740a93b8B62e93ed11a2c0651098E"
+      SPEND_ABI_PARAMS_JSON: ${{ secrets.SPEND_ABI_PARAMS_JSON }}
+
+      ARC_EXPLORER_TX: "https://testnet.arcscan.app/tx/"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install deps
+        run: |
+          npm ci || npm install
+
+      - name: Call spend() and capture circleTxId
+        shell: bash
+        run: |
+          set -euo pipefail
+          OUT=$(npx ts-node scripts/circle/07_callSpend_vault.ts)
+          echo "$OUT"
+
+          # Parse: line like "circleTxId: <uuid>"
+          TXID=$(echo "$OUT" | grep -Eo 'circleTxId:\s*[0-9a-fA-F-]+' | head -n 1 | sed 's/circleTxId:\s*//')
+          if [ -z "${TXID:-}" ]; then
+            echo "ERROR: Could not parse circleTxId from script output."
+            exit 1
+          fi
+
+          echo "CIRCLE_TX_ID=$TXID" >> "$GITHUB_ENV"
+          echo "Captured CIRCLE_TX_ID=$TXID"
+
+      - name: Wait for tx -> txHash -> Arcscan
+        run: npx ts-node scripts/circle/06_waitTx.ts
