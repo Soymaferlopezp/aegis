@@ -1,0 +1,136 @@
+name: circle-spend-vault
+
+on:
+  workflow_dispatch:
+    inputs:
+      to:
+        description: "Destination address (merchant) 0x..."
+        required: true
+        type: string
+      amount:
+        description: "Amount in USDC minor units (6 decimals) as integer string, e.g. 1000000"
+        required: true
+        type: string
+
+jobs:
+  execute:
+    runs-on: ubuntu-latest
+    outputs:
+      txHash: ${{ steps.extract.outputs.txHash }}
+      arcscan: ${{ steps.extract.outputs.arcscan }}
+      circleTxId: ${{ steps.extract.outputs.circleTxId }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install deps
+        run: npm ci
+
+      - name: Preflight env
+        run: |
+          test -n "${CIRCLE_API_KEY}" || (echo "Missing CIRCLE_API_KEY" && exit 1)
+          test -n "${CIRCLE_ENTITY_SECRET_HEX}" || (echo "Missing CIRCLE_ENTITY_SECRET_HEX" && exit 1)
+          test -n "${CIRCLE_WALLET_ID_AGENT}" || (echo "Missing CIRCLE_WALLET_ID_AGENT" && exit 1)
+          test -n "${VAULT_ADDRESS}" || (echo "Missing VAULT_ADDRESS" && exit 1)
+          test -n "${CIRCLE_BLOCKCHAIN}" || (echo "Missing CIRCLE_BLOCKCHAIN" && exit 1)
+          echo "OK env present."
+
+        env:
+          CIRCLE_API_KEY: ${{ secrets.CIRCLE_API_KEY }}
+          CIRCLE_ENTITY_SECRET_HEX: ${{ secrets.CIRCLE_ENTITY_SECRET_HEX }}
+          CIRCLE_WALLET_ID_AGENT: ${{ secrets.CIRCLE_WALLET_ID_AGENT }}
+          VAULT_ADDRESS: ${{ secrets.VAULT_ADDRESS }}
+          CIRCLE_BLOCKCHAIN: ${{ secrets.CIRCLE_BLOCKCHAIN }}
+
+      - name: Run Circle 07_callSpend_vault.ts (create contractExecution)
+        id: run07
+        env:
+          # Circle (NO renombrar)
+          CIRCLE_API_KEY: ${{ secrets.CIRCLE_API_KEY }}
+          CIRCLE_ENTITY_SECRET_HEX: ${{ secrets.CIRCLE_ENTITY_SECRET_HEX }}
+          CIRCLE_BASE_URL: ${{ secrets.CIRCLE_BASE_URL }}
+          CIRCLE_BLOCKCHAIN: ${{ secrets.CIRCLE_BLOCKCHAIN }} # must be ARC-TESTNET
+          CIRCLE_WALLET_ID_AGENT: ${{ secrets.CIRCLE_WALLET_ID_AGENT }}
+
+          # Vault
+          VAULT_ADDRESS: ${{ secrets.VAULT_ADDRESS }}
+
+          # Params from dispatcher
+          INPUT_TO: ${{ inputs.to }}
+          INPUT_AMOUNT: ${{ inputs.amount }}
+
+        run: |
+          # Build SPEND_ABI_PARAMS_JSON exactly as the script expects:
+          # ["0xDEST...","1000000"] or ["0xDEST...",1000000] both work, but we keep it clean.
+          SPEND_ABI_PARAMS_JSON=$(node -e 'const to=process.env.INPUT_TO; const amt=process.env.INPUT_AMOUNT; process.stdout.write(JSON.stringify([to, String(amt)]))')
+          echo "SPEND_ABI_PARAMS_JSON=${SPEND_ABI_PARAMS_JSON}" >> $GITHUB_ENV
+
+          # Run 07 and capture stdout
+          npx ts-node scripts/circle/07_callSpend_vault.ts | tee run07.out
+
+          # Extract circleTxId from EXACT stdout pattern:
+          # circleTxId: <ID>
+          CIRCLE_TX_ID=$(grep -Eo 'circleTxId:\s*[A-Za-z0-9-]+' run07.out | head -n 1 | sed -E 's/circleTxId:\s*//')
+          if [ -z "${CIRCLE_TX_ID}" ]; then
+            echo "Failed to parse circleTxId from 07 stdout"
+            echo "---- run07.out ----"
+            cat run07.out
+            exit 1
+          fi
+
+          echo "circleTxId=${CIRCLE_TX_ID}"
+          echo "CIRCLE_TX_ID=${CIRCLE_TX_ID}" >> $GITHUB_ENV
+
+      - name: Run Circle 06_waitTx.ts (poll -> txHash)
+        id: run06
+        env:
+          # Circle
+          CIRCLE_API_KEY: ${{ secrets.CIRCLE_API_KEY }}
+          CIRCLE_BASE_URL: ${{ secrets.CIRCLE_BASE_URL }}
+          # Arc explorer base (optional)
+          ARC_EXPLORER_TX: ${{ secrets.ARC_EXPLORER_TX }}
+          # From previous step
+          CIRCLE_TX_ID: ${{ env.CIRCLE_TX_ID }}
+        run: |
+          npx ts-node scripts/circle/06_waitTx.ts | tee run06.out
+
+      - name: Extract txHash + expose outputs
+        id: extract
+        env:
+          ARC_EXPLORER_TX: ${{ secrets.ARC_EXPLORER_TX }}
+          CIRCLE_TX_ID: ${{ env.CIRCLE_TX_ID }}
+        run: |
+          # EXACT stdout pattern:
+          # ✅ On-chain txHash: <0x...>
+          TX_HASH=$(grep -Eo '✅ On-chain txHash:\s*0x[0-9a-fA-F]{64}' run06.out | head -n 1 | sed -E 's/✅ On-chain txHash:\s*//')
+          if [ -z "${TX_HASH}" ]; then
+            echo "Failed to parse txHash from 06 stdout"
+            echo "---- run06.out ----"
+            cat run06.out
+            exit 1
+          fi
+
+          EXPLORER="${ARC_EXPLORER_TX:-https://testnet.arcscan.app/tx/}"
+          ARCSCAN="${EXPLORER}${TX_HASH}"
+
+          echo "txHash=${TX_HASH}"
+          echo "arcscan=${ARCSCAN}"
+          echo "circleTxId=${CIRCLE_TX_ID}"
+
+          # Set job outputs
+          echo "txHash=${TX_HASH}" >> $GITHUB_OUTPUT
+          echo "arcscan=${ARCSCAN}" >> $GITHUB_OUTPUT
+          echo "circleTxId=${CIRCLE_TX_ID}" >> $GITHUB_OUTPUT
+
+      - name: Summary
+        run: |
+          echo "✅ circleTxId: ${{ steps.extract.outputs.circleTxId }}"
+          echo "✅ txHash:     ${{ steps.extract.outputs.txHash }}"
+          echo "🔎 arcscan:    ${{ steps.extract.outputs.arcscan }}"

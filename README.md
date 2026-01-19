@@ -453,3 +453,262 @@ Listo para integrar con:
 - Políticas más avanzadas (ventanas dinámicas, listas blancas).
 - Auditoría formal.
 
+---
+
+# Circle Programmable Wallets Integration
+
+Este módulo implementa la **integración completa de Circle Programmable Wallets (Developer-Controlled)** para habilitar que un **agente de IA** ejecute transacciones on-chain en **Arc Testnet**, incluyendo:
+
+- Creación de wallets controladas por Circle
+- Obtención de address on-chain del agente
+- Transferencia de USDC en Arc Testnet
+- Ejecución de `spend()` contra un contrato `VaultGuardrails`
+- Automatización vía GitHub Actions (sin frontend)
+
+Todo el flujo es **real, verificable on-chain**, sin mocks.
+
+---
+
+## Objetivo (Fase 2.1)
+
+- Integrar Circle Wallets (sandbox/testnet)
+- Crear la wallet del agente (developer-controlled)
+- Emitir al menos **1 transacción USDC** en Arc Testnet
+- Ejecutar `spend(address,uint256)` desde el agente contra el Vault
+- Obtener evidencia:
+  - `circleTxId`
+  - `txHash`
+  - link a Arcscan
+
+---
+
+## Networks & Contracts
+
+### Arc Testnet
+- RPC: `https://rpc.testnet.arc.network`
+- Explorer: `https://testnet.arcscan.app`
+
+### USDC (Arc Testnet)
+- Address: `0x3600000000000000000000000000000000000000`
+
+### VaultGuardrails (ya deployado)
+- Address:  
+  `0x3fFd55E53D7740a93b8B62e93ed11a2c0651098E`
+
+---
+
+## Arquitectura de alto nivel
+```bash
+┌───────────────────────────┐
+│        GitHub Actions     │
+│  (CI / Automation Layer)  │
+└─────────────┬─────────────┘
+              │
+              │  REST API (W3S)
+              ▼
+┌───────────────────────────┐
+│        Circle W3S         │
+│  Programmable Wallets     │
+│  (Developer-Controlled)   │
+└─────────────┬─────────────┘
+              │
+              │  Signed tx / Contract execution
+              ▼
+┌──────────────────────────┐
+│        Arc Testnet       │
+│        (EVM Chain)       │
+│                          │
+│  ┌─────────────────────┐ │
+│  │  Agent Wallet (EOA) │◄┼── Circle-controlled signer
+│  └─────────┬───────────┘ │
+│            │             │
+│            │ spend()     │
+│            ▼             │
+│  ┌─────────────────────┐ │
+│  │  VaultGuardrails    │ │
+│  │  - onlyAgent        │ │
+│  │  - maxPerTx         │ │
+│  │  - dailyLimit       │ │
+│  └─────────────────────┘ │
+│            │             │
+│            ▼             │
+│        USDC (Arc)        │
+└──────────────────────────┘
+
+```
+---
+## Estructura de carpetas
+```bash
+.
+├── scripts/
+│   ├── circle/
+│   │   ├── 00_publicKey.ts              # Get entity public key (Circle)
+│   │   ├── 01_createWalletSet.ts         # Create WalletSet
+│   │   ├── 02_createWallets_arc.ts       # Create agent + receiver wallets
+│   │   ├── 04_getBalances.ts             # Get balances (tokenId discovery)
+│   │   ├── 05_transfer_usdc.ts           # USDC transfer (agent → receiver)
+│   │   ├── 06_waitTx.ts                  # Poll tx → state + txHash
+│   │   ├── 07_callSpend_vault.ts         # Call spend() on Vault
+│   │   └── _shared.ts                    # Shared Circle helpers
+│   │
+│   └── vault/
+│       ├── 00_readVaultState.ts          # Read owner / agentExecutor
+│       └── 01_setAgentExecutor_circle.ts # setAgentExecutor(agent)
+│
+├── .github/
+│   └── workflows/
+│       ├── circle-spend-and-wait.yml     # spend() + wait (1 click)
+│       ├── vault-read.yml                # Read Vault state
+│       └── vault-set-agent-executor.yml  # Admin tx (owner)
+│
+├── deployments/
+│   └── arcTestnet.json                   # Registry (Vault already deployed)
+│
+├── .env.example                          # Environment reference (no secrets)
+└── README.circle-integration.md           # Circle integration documentation
+
+```
+
+---
+
+## Variables de entorno
+
+### `.env.example` (referencia)
+
+```bash 
+env
+# Circle
+CIRCLE_API_KEY=TEST_API_KEY:***
+CIRCLE_ENTITY_SECRET_HEX=
+CIRCLE_BASE_URL=https://api.circle.com/v1/w3s
+CIRCLE_BLOCKCHAIN=ARC-TESTNET
+
+# Wallets
+CIRCLE_WALLET_SET_ID=
+CIRCLE_WALLET_ID_AGENT=
+
+# Vault
+VAULT_ADDRESS=0x3fFd55E53D7740a93b8B62e93ed11a2c0651098E
+CIRCLE_WALLET_ADDRESS_AGENT=
+
+# Spend params (JSON ABI)
+SPEND_ABI_PARAMS_JSON=["0xDESTINATION",100000]
+
+# Arc
+ARC_EXPLORER_TX=https://testnet.arcscan.app/tx/
+⚠️ En GitHub Actions todas estas variables se cargan como Repository Secrets.
+```
+---
+
+## Flujo ejecutado (paso a paso)
+1️.- Configuración de Entity (Circle Console)
+
+- Se obtiene el publicKey del entity
+- Se cifra el Entity Secret
+- Se setea el ciphertext en Circle Console
+(Este paso se hace una sola vez)
+
+2.- Creación de WalletSet y wallets
+Scripts:
+- 01_createWalletSet.ts
+- 02_createWallets_arc.ts
+
+Resultados:
+- Wallet del agente creada
+- Address on-chain obtenido
+
+Agent address (Arc):
+```bash
+0x94f6256f780b4ba6589166dc51765e6d3675dd6c
+```
+
+3.- Transferencia USDC (evidencia mínima)
+
+Scripts:
+- 04_getBalances.ts
+- 05_transfer_usdc.ts
+- 06_waitTx.ts
+
+Resultado:
+- USDC transferido en Arc Testnet
+- txHash verificable en Arcscan
+
+4.- Habilitar agente en el Vault (puente Fase 1 → Fase 2)
+
+El Vault usa:
+```bash
+modifier onlyAgent() {
+  if (msg.sender != agentExecutor) revert Unauthorized();
+}
+```
+
+Se ejecutó como owner:
+```bash
+setAgentExecutor(circleAgentAddress)
+```
+
+Tx administrativa (Arc):
+```bash
+0xe6d135880774ad28aa23309a79a7bbac934e3e30f883a88e86680b73880ba514
+```
+
+5.- Ejecución de spend() (flujo final automatizado)
+
+Workflow:
+```bash
+.github/workflows/circle-spend-and-wait.yml
+```
+
+Este workflow:
+1. Llama spend(address,uint256)
+2. Captura automáticamente el circleTxId
+3. Espera confirmación
+4. Imprime txHash + Arcscan
+
+Resultado final (spend on-chain):
+* circleTxId: a8faa556-b5d1-578d-bccf-c15d861e5360
+* txHash:
+0x7ecf3e46301a586637d3ce0af27fe61967abbd9e607004a772c05f7c6f3333a8
+* Arcscan:
+https://testnet.arcscan.app/tx/0x7ecf3e46301a586637d3ce0af27fe61967abbd9e607004a772c05f7c6f3333a8
+
+---
+
+## Automatización (por qué GitHub Actions)
+
+Debido a:
+- restricciones regionales
+- estabilidad
+- necesidad de evidencia reproducible
+
+Toda la integración se ejecuta vía GitHub Actions, evitando dependencias locales, VPNs o UI manual.
+
+En producción, este flujo se reemplaza por:
+- backend + webhooks
+- polling automático
+- persistencia de estados
+
+--- 
+## Troubleshooting real (casos encontrados)
+
+blockchain not supported
+- Usar ARC-TESTNET, no ARC
+
+ESTIMATION_ERROR / Unauthorized
+- El Vault no reconoce aún al agente
+- Solución: setAgentExecutor(circleAgentAddress)
+
+JSON parse error en SPEND_ABI_PARAMS_JSON
+- Debe ser JSON válido:
+```bash
+["0xDESTINATION",100000]
+```
+---
+## Estado final
+
+- Wallet Circle creada
+- Address del agente en Arc
+- Transferencia USDC on-chain
+- Vault conectado al agente
+- spend() ejecutado y verificado
+- Automatización completa (1 click)
