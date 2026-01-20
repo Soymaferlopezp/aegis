@@ -1,44 +1,38 @@
-#!/usr/bin/env ts-node
-
 import "dotenv/config";
-import { geminiSimulate } from "../gemini/client";
-import { buildSimulatePrompt } from "../gemini/prompt";
 import { readVaultState } from "../vault/readState";
+import { buildSimulatePrompt } from "../gemini/prompt";
+import { geminiSimulate } from "../gemini/client";
 import { validateAgainstVault } from "../validate";
 import { runCircleSpendViaGitHubActions } from "../circle/githubActions";
-
-function mustEnv(name: string): string {
-  const v = process.env[name];
-  if (!v) throw new Error(`Missing env var: ${name}`);
-  return v;
-}
 
 function step(name: string, data?: any) {
   const payload = data ? ` ${JSON.stringify(data)}` : "";
   console.error(`[${new Date().toISOString()}] STEP ${name}${payload}`);
 }
 
-function fail(scope: string, err: any) {
-  console.error(
-    `[${new Date().toISOString()}] ERROR ${scope}`,
-    err?.response?.data ?? err?.message ?? err
-  );
+function fail(label: string, err: any): never {
+  const msg =
+    typeof err === "string"
+      ? err
+      : err?.response?.data?.error
+      ? err.response.data.error
+      : err?.message ?? err;
+
+  console.error(`[${new Date().toISOString()}] ERROR ${label}`, msg);
   process.exit(1);
 }
 
-async function main() {
+function getIntentFromArgv(): string {
   const intent = process.argv.slice(2).join(" ").trim();
-  if (!intent) throw new Error("Missing intent text");
+  if (!intent) throw new Error(`Missing intent. Usage: npm run agent:execute -- "Comprar 1 USDC de café"`);
+  return intent;
+}
 
+async function main() {
+  const intent = getIntentFromArgv();
   step("execute.start", { intent });
 
-  // Merchant fijo (misma fuente que simulate)
-  const merchant =
-    process.env.MERCHANT_ADDRESS ??
-    process.env.DESTINATION_ADDRESS ??
-    mustEnv("DESTINATION_ADDRESS");
-
-  // 1) Leer Vault (read-only)
+  // 1) Read vault state (read-only)
   const vault = await readVaultState();
   step("vault.read.ok", {
     maxPerTx: vault.maxPerTx,
@@ -46,71 +40,69 @@ async function main() {
     spentToday: vault.spentToday,
   });
 
-  // 2) Construir prompt + Gemini
+  // 2) Gemini simulate -> strict JSON decision
+  const merchant = process.env.DESTINATION_ADDRESS ?? process.env.SMOKE_RECIPIENT_ADDRESS ?? "";
+  if (!merchant) throw new Error("Missing DESTINATION_ADDRESS (or SMOKE_RECIPIENT_ADDRESS) for merchant");
+
   const prompt = buildSimulatePrompt({ intent, merchant });
+
   step("gemini.request");
-
   const decision = await geminiSimulate(prompt);
-  step("gemini.decision.ok", {
-    to: decision.to,
-    amount: decision.amount,
-  });
+  step("gemini.decision.ok", { to: decision.to, amount: decision.amount });
 
-  // 3) Validación backend (guardrails)
-  const verdict = validateAgainstVault({
-    amount: decision.amount,
-    vault,
-  });
+  // 3) Validate decision against vault limits
+  const verdict = validateAgainstVault({ amount: decision.amount, vault });
 
   if (verdict.status !== "APPROVED_READY") {
     step("validation.blocked", { reason: verdict.reason });
 
-    process.stdout.write(
-      JSON.stringify({
-        status: "BLOCKED",
-        to: decision.to,
-        amount: decision.amount,
-        currency: decision.currency,
-        reason: verdict.reason,
-        reason_model: decision.reason,
-        vault,
-      })
-    );
+    // stdout: SOLO JSON final
+    const out = {
+      status: "BLOCKED" as const,
+      to: decision.to,
+      amount: decision.amount,
+      currency: decision.currency,
+      reason: verdict.reason, // backend verdict
+      reason_model: decision.reason, // model text preserved separately
+      vault, // mantiene evidencia
+    };
+
+    console.log(JSON.stringify(out));
     return;
   }
 
   step("validation.pass");
 
-  // 4) Ejecutar Circle vía GitHub Actions (SOLO si APPROVED_READY)
-  step("circle.dispatch.github_actions", {
+  // 4) Strict gate: only here we call Circle (via GitHub Actions)
+  step("circle.dispatch.github_actions", { to: decision.to, amount: decision.amount });
+
+  const confirmed = await runCircleSpendViaGitHubActions({
     to: decision.to,
     amount: decision.amount,
   });
 
-  const result = await runCircleSpendViaGitHubActions({
+  // sanitize (prevenir JSON roto por \r\n)
+  const circleTxId = String(confirmed.circleTxId).trim();
+  const txHash = String(confirmed.txHash).trim();
+  const arcscan = String(confirmed.arcscan).trim();
+
+  step("circle.tx.confirmed", { circleTxId, txHash });
+
+  // stdout: SOLO JSON final
+  const out = {
+    status: "APPROVED" as const,
     to: decision.to,
     amount: decision.amount,
-  });
+    currency: decision.currency,
+    reason: verdict.reason, // backend verdict
+    reason_model: decision.reason,
+    circle: { circleTxId },
+    txHash,
+    arcscan, // ✅ link directo
+    vault,
+  };
 
-  step("circle.tx.confirmed", {
-    circleTxId: result.circleTxId,
-    txHash: result.txHash,
-  });
-
-  // 5) Output final (stdout SOLO JSON)
-  process.stdout.write(
-    JSON.stringify({
-      status: "APPROVED",
-      to: decision.to,
-      amount: decision.amount,
-      currency: decision.currency,
-      reason: verdict.reason,
-      reason_model: decision.reason,
-      circle: { circleTxId: result.circleTxId },
-      txHash: result.txHash,
-      arcscan: result.arcscan,
-    })
-  );
+  console.log(JSON.stringify(out));
 }
 
 main().catch((e) => fail("execute", e));

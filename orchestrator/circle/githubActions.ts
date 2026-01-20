@@ -88,7 +88,6 @@ async function waitForDispatchedRun(workflowFile: string, dispatchedAtIso: strin
   for (let i = 0; i < 90; i++) {
     const runs = await listRecentRuns(workflowFile);
 
-    // filtramos por runs creados "después del dispatch"
     const candidates = runs
       .filter((r) => isoToMs(r.created_at) >= threshold)
       .sort((a, b) => isoToMs(b.created_at) - isoToMs(a.created_at));
@@ -116,6 +115,8 @@ async function waitForRunCompletion(runId: number): Promise<void> {
   const { owner, repo } = parseRepo();
   const gh = ghClient();
 
+  step("gh.run.url", { url: `https://github.com/${owner}/${repo}/actions/runs/${runId}` });
+
   for (let i = 0; i < 240; i++) {
     const res = await gh.get(`/repos/${owner}/${repo}/actions/runs/${runId}`);
     const status = res.data?.status as string;
@@ -137,7 +138,9 @@ async function waitForRunCompletion(runId: number): Promise<void> {
   throw new Error("Timeout waiting for GitHub Actions run completion");
 }
 
-async function downloadResultArtifact(runId: number): Promise<{ circleTxId: string; txHash: string; arcscan: string }> {
+async function downloadResultArtifact(
+  runId: number
+): Promise<{ circleTxId: string; txHash: string; arcscan: string }> {
   const { owner, repo } = parseRepo();
   const gh = ghClient();
 
@@ -179,17 +182,17 @@ async function downloadResultArtifact(runId: number): Promise<{ circleTxId: stri
     throw new Error(`Invalid JSON in circle_result.json: ${jsonStr.slice(0, 200)}`);
   }
 
-  if (!parsed?.txHash || !parsed?.arcscan || !parsed?.circleTxId) {
+  const circleTxId = String(parsed?.circleTxId ?? "").trim();
+  const txHash = String(parsed?.txHash ?? "").trim();
+  const arcscan = String(parsed?.arcscan ?? "").trim();
+
+  if (!circleTxId || !txHash || !arcscan) {
     throw new Error(`circle_result.json missing fields: ${jsonStr}`);
   }
 
   step("gh.artifact.parsed.ok");
 
-  return {
-    circleTxId: String(parsed.circleTxId),
-    txHash: String(parsed.txHash),
-    arcscan: String(parsed.arcscan),
-  };
+  return { circleTxId, txHash, arcscan };
 }
 
 export async function runCircleSpendViaGitHubActions(params: { to: string; amount: string }) {
@@ -203,12 +206,9 @@ export async function runCircleSpendViaGitHubActions(params: { to: string; amoun
     amount: params.amount,
   });
 
-  // Espera a que el run aparezca (por timestamp)
   const runId = await waitForDispatchedRun(workflowFile, dispatchedAtIso);
 
-  // Espera a que termine
   await waitForRunCompletion(runId);
 
-  // Descarga artifact con el resultado
   return await downloadResultArtifact(runId);
 }
