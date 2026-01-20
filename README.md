@@ -712,3 +712,307 @@ JSON parse error en SPEND_ABI_PARAMS_JSON
 - Vault conectado al agente
 - spend() ejecutado y verificado
 - Automatización completa (1 click)
+
+---
+
+# Aegis — Backend Orchestrator (Fase 2.2)
+
+**Aegis** es un sistema de *financial guardrails* para agentes de IA.  
+Este repositorio implementa el **Backend Orchestrator (CLI)** que conecta:
+
+**Intención humana → IA (Gemini) → Validación on-chain (Vault) → Ejecución real (Circle + Arc Testnet)**
+
+Todo **sin mocks**, **sin UI**, **sin server**, **100% reproducible**.
+
+---
+
+## 🧠 Qué resuelve este Orchestrator
+
+- Traduce lenguaje natural a una **intención financiera estructurada**
+- Aplica **límites on-chain reales** antes de mover dinero
+- Ejecuta pagos **reales** en testnet usando **Circle Programmable Wallets**
+- Bloquea transacciones **antes** de gastar si violan reglas
+- Produce un **JSON final limpio**, listo para agentes o integraciones
+
+---
+
+## 🧠 Arquitectura de Alto Nivel — Aegis Orchestrator (CLI)
+
+```bash
+┌──────────────────────────────┐
+│ 👤 Usuario / Agente IA       │
+│ Texto libre (ej:             │
+│ "Comprar 1 USDC de café")    │
+└──────────────┬───────────────┘
+               │
+               ▼
+┌──────────────────────────────┐
+│ 🤖 Gemini (LLM – FREE Tier)  │
+│ - Extrae intención           │
+│ - Convierte a JSON estricto  │
+│ - amount en minor units      │
+│ - merchant fijo              │
+└──────────────┬───────────────┘
+               │
+               ▼
+┌────────────────────────────────────────┐
+│ 🧩 Orchestrator CLI (Node.js / TS)    │
+│                                        │
+│ 1️⃣ simulate                            │
+│   - Solo Gemini                        │
+│   - Sin blockchain                     │
+│                                        │
+│ 2️⃣ validate                           │
+│   - Lee Vault on-chain                 │
+│   - Aplica guardrails reales           │
+│   - Decide: APPROVED_READY | BLOCKED   │
+│                                        │
+│ 3️⃣ execute                             │
+│   - Revalida                           │
+│   - Gate estricto                      │
+└──────────────┬─────────────────────────┘
+               │
+               ▼
+┌──────────────────────────────┐
+│ 🔒 VaultGuardrails (on-chain)│
+│ Arc Testnet                  │
+│                              │
+│ Getters reales:              │
+│ - maxPerTx                   │
+│ - dailyLimit                 │
+│ - spentInCurrentDay          │
+│ - owner                      │
+│ - agentExecutor              │
+└──────────────┬───────────────┘
+               │
+               ▼
+        ┌───────────────┐
+        │ 🧠 Decisión   │
+        └──────┬────────┘
+               │
+      ┌────────┴─────────┐
+      │                  │
+      ▼                  ▼
+┌──────────────┐   ┌──────────────────────────────┐
+│ ⛔ BLOCKED   │   │ ✅ APPROVED_READY           │
+│              │   │                              │
+│ - NO Circle  │   │ - Dispatch a GitHub Actions  │
+│ - NO gasto   │   │ - Region-safe execution      │
+│ - JSON final │   │                              │
+└──────────────┘   └──────────────┬───────────────┘
+                                   │
+                                   ▼
+┌────────────────────────────────────────┐
+│ ⚙️ GitHub Actions Workflow             │
+│ (circle_spend_vault.yml)               │
+│                                        │
+│ - Ejecuta scripts CLI existentes       │
+│   • 07_callSpend_vault.ts              │
+│   • 06_waitTx.ts                       │
+│ - Maneja secrets Circle                │
+│ - Evita bloqueos regionales            │
+└──────────────┬─────────────────────────┘
+               │
+               ▼
+┌──────────────────────────────┐
+│ 💳 Circle Programmable Wallet│
+│ - contractExecution spend()  │
+│ - Firma y broadcast          │
+└──────────────┬───────────────┘
+               │
+               ▼
+┌──────────────────────────────┐
+│ ⛓️ Arc Testnet               │
+│ - Transacción on-chain       │
+│ - txHash final               │
+│ - Verificable en Arcscan     │
+└──────────────┬───────────────┘
+               │
+               ▼
+┌──────────────────────────────┐
+│ 📤 Output final (stdout)     │
+│ JSON único y determinista    │
+│                              │
+│ Incluye:                     │
+│ - status                     │
+│ - amount / to                │
+│ - reason (backend)           │
+│ - txHash                     │
+│ - arcscan URL                │
+│ - estado del Vault           │
+└──────────────────────────────┘
+```
+---
+## Estructura de Carpetas
+```bash
+.
+├─ orchestrator/
+│  ├─ cli/
+│  │  ├─ simulate.ts        # Intent → Gemini → JSON (sin blockchain)
+│  │  ├─ validate.ts        # Gemini + Vault → APPROVED | BLOCKED
+│  │  └─ execute.ts         # Flujo completo + Circle
+│  │
+│  ├─ gemini/
+│  │  ├─ client.ts          # Cliente Gemini (retry + JSON estricto)
+│  │  ├─ prompt.ts          # Prompt determinista
+│  │  └─ schema.ts          # Zod schema (fuente de verdad)
+│  │
+│  ├─ vault/
+│  │  └─ readState.ts       # Lectura on-chain del Vault (getters reales)
+│  │
+│  └─ github/
+│     └─ dispatch.ts        # Dispatch + polling + artifacts (GitHub Actions)
+│
+├─ scripts/
+│  ├─ circle/
+│  │  ├─ _shared.ts
+│  │  ├─ 06_waitTx.ts       # Poll Circle → txHash
+│  │  └─ 07_callSpend_vault.ts # contractExecution spend()
+│  │
+│  └─ vault/
+│     ├─ 02_checkBalances.ts
+│     └─ 03_depositToVault.ts
+│
+├─ .github/
+│  └─ workflows/
+│     └─ circle_spend_vault.yml
+│
+├─ contracts/
+├─ deployments/
+├─ artifacts/
+├─ test/
+├─ hardhat.config.ts
+├─ package.json
+└─ README.md
+```
+
+---
+## Variables de Entorno
+
+```bash
+### Gemini (IA)
+```env
+GEMINI_API_KEY=AIza...
+GEMINI_MODEL=gemini-1.5-flash   # opcional (tiene default)
+
+### Circle (NO renombrar)
+env
+CIRCLE_API_KEY=***
+CIRCLE_ENTITY_SECRET_HEX=***
+CIRCLE_BASE_URL=//api.circle.com/v1/w3s
+CIRCLE_BLOCKCHAIN=ARC-TESTNET
+
+### Vault / Arc
+env
+ARC_TESTNET_RPC_PRIMARY=https://rpc.testnet.arc.network
+ARC_TESTNET_CHAIN_ID=5042002
+ARC_EXPLORER_TX=https://testnet.arcscan.app/tx/
+
+USDC_ARC=0x3600000000000000000000000000000000000000
+VAULT_ADDRESS=0x...
+
+### GitHub Actions
+env
+GITHUB_TOKEN=ghp_...
+GITHUB_REPO=Soymaferlopezp/aegis
+GITHUB_WORKFLOW_FILE=circle_spend_vault.yml
+```
+---
+
+## Comandos CLI
+
+1. Simulación (solo IA)
+```bash
+npm run agent:simulate -- "Comprar 2 USDC de café"
+
+Salida (stdout):
+
+{
+  "to": "0x...",
+  "amount": "2000000",
+  "currency": "USDC",
+  "reason": "Compra de café"
+}
+```
+
+2. Validación (IA + Vault)
+```bash
+npm run agent:validate -- "Comprar 300 USDC de café"
+
+Salida BLOCKED:
+
+{
+  "status": "BLOCKED",
+  "reason": "amount > maxPerTx",
+  "vault": {
+    "maxPerTx": "100000000",
+    "dailyLimit": "250000000",
+    "spentToday": "3000000"
+  }
+}
+
+* No se ejecuta Circle.
+```
+
+3. Ejecución completa (IA + Vault + Circle)
+```bash
+npm run agent:execute -- "Comprar 1 USDC de café"
+
+Salida APPROVED:
+
+{
+  "status": "APPROVED",
+  "to": "0xc0d3...",
+  "amount": "1000000",
+  "currency": "USDC",
+  "reason": "Within limits",
+  "circle": {
+    "circleTxId": "e01ab7a9-d9cf-537c-9ade-af7b2e89fa5b"
+  },
+  "txHash": "0xc3b4d50d1cd04461bbef5bc33a0b857ab0678f593d2a76c95f4ff9ff91dd4777",
+  "arcscan": "https://testnet.arcscan.app/tx/0xc3b4d50d1cd04461bbef5bc33a0b857ab0678f593d2a76c95f4ff9ff91dd4777"
+}
+```
+---
+
+## Reglas Críticas del Sistema
+
+* **stdout** → solo JSON final
+* **stderr** → logs STEP
+* **BLOCKED** → nunca ejecuta Circle
+* **ERROR** → exit code 1, stdout vacío
+* Circle se ejecuta solo vía GitHub Actions (region-safe)
+* No se replica lógica de Vault: se lee on-chain
+
+---
+
+## Vault: Fondos y Pruebas
+* Ver balances
+```bash
+npx ts-node scripts/vault/02_checkBalances.ts
+```
+
+* Depositar USDC al Vault
+```bash
+npx ts-node scripts/vault/03_depositToVault.ts 5
+```
+El **Vault contract** es quien debe tener fondos, no el agente humano.
+
+---
+
+## Por qué este diseño importa
+
+* La IA no decide gastar, solo propone
+* El contrato sí decide si se gasta
+* El backend orquesta, no confía
+* El flujo es auditable, determinista y reproducible
+* Esto es lo mínimo necesario para que agentes de IA puedan manejar dinero sin volverse peligrosos.
+
+---
+
+## Estado del Proyecto
+
+✅ Fase 1 — Vault & Guardrails
+✅ Fase 2.1 — Circle Spend manual
+✅ Fase 2.2 — Backend Orchestrator (este README)
+⏳ Fase 3 — Auditoría / El Testigo (fuera de scope)
