@@ -1,11 +1,11 @@
+#!/usr/bin/env ts-node
+
 import "dotenv/config";
-import { step, errorLog } from "../logger";
-import { buildSimulatePrompt } from "../gemini/prompt";
 import { geminiSimulate } from "../gemini/client";
+import { buildSimulatePrompt } from "../gemini/prompt";
 import { readVaultState } from "../vault/readState";
 import { validateAgainstVault } from "../validate";
-import { runSubprocess, parseCircleTxId, parseOnChainTxHash } from "../circle/subprocess";
-import { arcscanTxLink } from "../arcscan";
+import { runCircleSpendViaGitHubActions } from "../circle/githubActions";
 
 function mustEnv(name: string): string {
   const v = process.env[name];
@@ -13,127 +13,104 @@ function mustEnv(name: string): string {
   return v;
 }
 
+function step(name: string, data?: any) {
+  const payload = data ? ` ${JSON.stringify(data)}` : "";
+  console.error(`[${new Date().toISOString()}] STEP ${name}${payload}`);
+}
+
+function fail(scope: string, err: any) {
+  console.error(
+    `[${new Date().toISOString()}] ERROR ${scope}`,
+    err?.response?.data ?? err?.message ?? err
+  );
+  process.exit(1);
+}
+
 async function main() {
   const intent = process.argv.slice(2).join(" ").trim();
-  if (!intent) throw new Error("Missing intent argument");
-
-  // Enforce using real repo value (no fallback "ARC")
-  const circleBlockchain = mustEnv("CIRCLE_BLOCKCHAIN"); // must be ARC-TESTNET
-  if (circleBlockchain !== "ARC-TESTNET") {
-    throw new Error(`CIRCLE_BLOCKCHAIN must be ARC-TESTNET. Got: ${circleBlockchain}`);
-  }
-
-  const merchant =
-    process.env.MERCHANT_ADDRESS ||
-    process.env.DESTINATION_ADDRESS ||
-    "0x000000000000000000000000000000000000dEaD";
+  if (!intent) throw new Error("Missing intent text");
 
   step("execute.start", { intent });
 
+  // Merchant fijo (misma fuente que simulate)
+  const merchant =
+    process.env.MERCHANT_ADDRESS ??
+    process.env.DESTINATION_ADDRESS ??
+    mustEnv("DESTINATION_ADDRESS");
+
+  // 1) Leer Vault (read-only)
   const vault = await readVaultState();
   step("vault.read.ok", {
     maxPerTx: vault.maxPerTx,
     dailyLimit: vault.dailyLimit,
-    spentToday: vault.spentToday
+    spentToday: vault.spentToday,
   });
 
+  // 2) Construir prompt + Gemini
   const prompt = buildSimulatePrompt({ intent, merchant });
   step("gemini.request");
 
-  const modelDecision = await geminiSimulate(prompt)
-  step("gemini.decision.ok", { to: modelDecision.to, amount: modelDecision.amount });
+  const decision = await geminiSimulate(prompt);
+  step("gemini.decision.ok", {
+    to: decision.to,
+    amount: decision.amount,
+  });
 
-  const verdict = validateAgainstVault({ amount: modelDecision.amount, vault });
+  // 3) Validación backend (guardrails)
+  const verdict = validateAgainstVault({
+    amount: decision.amount,
+    vault,
+  });
 
-  // Gate STRICT: no Circle subprocess unless APPROVED_READY
   if (verdict.status !== "APPROVED_READY") {
     step("validation.blocked", { reason: verdict.reason });
 
-    const out = {
-      status: "BLOCKED" as const,
-      to: modelDecision.to,
-      amount: modelDecision.amount,
-      currency: modelDecision.currency,
-      reason: verdict.reason, // backend verdict
-      reason_model: modelDecision.reason
-    };
-
-    process.stdout.write(JSON.stringify(out) + "\n");
+    process.stdout.write(
+      JSON.stringify({
+        status: "BLOCKED",
+        to: decision.to,
+        amount: decision.amount,
+        currency: decision.currency,
+        reason: verdict.reason,
+        reason_model: decision.reason,
+        vault,
+      })
+    );
     return;
   }
 
   step("validation.pass");
 
-  // Prepare SPEND_ABI_PARAMS_JSON for 07 script
-  const spendParamsJson = JSON.stringify([modelDecision.to, Number(modelDecision.amount)]);
-
-  step("circle.spawn.07_callSpend_vault");
-  const res07 = await runSubprocess({
-    cmd: process.platform === "win32" ? "node_modules\\.bin\\ts-node.cmd" : "node_modules/.bin/ts-node",
-    args: ["scripts/circle/07_callSpend_vault.ts"],
-
-    env: {
-      // DO NOT rename Circle env vars; only inject what 07 needs
-      VAULT_ADDRESS: mustEnv("VAULT_ADDRESS"),
-      CIRCLE_WALLET_ID_AGENT: mustEnv("CIRCLE_WALLET_ID_AGENT"),
-      CIRCLE_ENTITY_SECRET_HEX: mustEnv("CIRCLE_ENTITY_SECRET_HEX"),
-      CIRCLE_API_KEY: mustEnv("CIRCLE_API_KEY"),
-      CIRCLE_BASE_URL: process.env.CIRCLE_BASE_URL, // optional but recommended to be set
-      CIRCLE_BLOCKCHAIN: circleBlockchain,
-      SPEND_ABI_PARAMS_JSON: spendParamsJson
-    }
+  // 4) Ejecutar Circle vía GitHub Actions (SOLO si APPROVED_READY)
+  step("circle.dispatch.github_actions", {
+    to: decision.to,
+    amount: decision.amount,
   });
 
-  if (res07.code !== 0) {
-    throw new Error(`Circle 07_callSpend_vault failed. stderr=${res07.stderr.slice(0, 600)}`);
-  }
-
-  const circleTxId = parseCircleTxId(res07.stdout);
-  if (!circleTxId) {
-    throw new Error(`Failed to parse circleTxId from 07 stdout. stdout=${res07.stdout.slice(0, 600)}`);
-  }
-
-  step("circle.contractExecution.created", { circleTxId });
-
-  step("circle.spawn.06_waitTx");
-  const res06 = await runSubprocess({
-    cmd: process.platform === "win32" ? "node_modules\\.bin\\ts-node.cmd" : "node_modules/.bin/ts-node",
-    args: ["scripts/circle/06_waitTx.ts"],
-    env: {
-      CIRCLE_API_KEY: mustEnv("CIRCLE_API_KEY"),
-      CIRCLE_BASE_URL: process.env.CIRCLE_BASE_URL,
-      CIRCLE_TX_ID: circleTxId,
-      ARC_EXPLORER_TX: process.env.ARC_EXPLORER_TX
-    }
+  const result = await runCircleSpendViaGitHubActions({
+    to: decision.to,
+    amount: decision.amount,
   });
 
-  if (res06.code !== 0) {
-    throw new Error(`Circle 06_waitTx failed. stderr=${res06.stderr.slice(0, 600)}`);
-  }
+  step("circle.tx.confirmed", {
+    circleTxId: result.circleTxId,
+    txHash: result.txHash,
+  });
 
-  const txHash = parseOnChainTxHash(res06.stdout);
-  if (!txHash) {
-    throw new Error(`Failed to parse txHash from 06 stdout. stdout=${res06.stdout.slice(0, 800)}`);
-  }
-
-  step("circle.tx.confirmed", { txHash });
-
-  const out = {
-    status: "APPROVED" as const,
-    to: modelDecision.to,
-    amount: modelDecision.amount,
-    currency: modelDecision.currency,
-    reason: verdict.reason, // backend verdict
-    reason_model: modelDecision.reason,
-    circle: { circleTxId },
-    txHash,
-    arcscan: arcscanTxLink(txHash)
-  };
-
-  process.stdout.write(JSON.stringify(out) + "\n");
+  // 5) Output final (stdout SOLO JSON)
+  process.stdout.write(
+    JSON.stringify({
+      status: "APPROVED",
+      to: decision.to,
+      amount: decision.amount,
+      currency: decision.currency,
+      reason: verdict.reason,
+      reason_model: decision.reason,
+      circle: { circleTxId: result.circleTxId },
+      txHash: result.txHash,
+      arcscan: result.arcscan,
+    })
+  );
 }
 
-main().catch((e) => {
-  errorLog("execute", e);
-  process.exit(1);
-});
+main().catch((e) => fail("execute", e));

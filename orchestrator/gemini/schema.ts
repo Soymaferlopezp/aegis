@@ -1,10 +1,16 @@
 import { z } from "zod";
 
+/**
+ * Decisión producida por Gemini (JSON estricto).
+ * - amount: minor units (USDC 6 decimales)
+ * - tolera number o string y lo normaliza a string
+ */
 export const SimulateDecisionSchema = z.object({
-  to: z.string().regex(/^0x[a-fA-F0-9]{40}$/),
-  amount: z.string().regex(/^\d+$/), // minor units (6 decimals), integer string
+  to: z.string(),
+  amount: z.union([z.string(), z.number()]).transform((v) => String(v)),
   currency: z.literal("USDC"),
-  reason: z.string().min(1) // model reason (simulate)
+  reason: z.string(),
+  reason_model: z.string().optional(),
 });
 
 export type SimulateDecision = z.infer<typeof SimulateDecisionSchema>;
