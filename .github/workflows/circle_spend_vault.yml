@@ -41,7 +41,6 @@ jobs:
           test -n "${VAULT_ADDRESS}" || (echo "Missing VAULT_ADDRESS" && exit 1)
           test -n "${CIRCLE_BLOCKCHAIN}" || (echo "Missing CIRCLE_BLOCKCHAIN" && exit 1)
           echo "OK env present."
-
         env:
           CIRCLE_API_KEY: ${{ secrets.CIRCLE_API_KEY }}
           CIRCLE_ENTITY_SECRET_HEX: ${{ secrets.CIRCLE_ENTITY_SECRET_HEX }}
@@ -68,8 +67,8 @@ jobs:
 
         run: |
           # Build SPEND_ABI_PARAMS_JSON exactly as the script expects:
-          # ["0xDEST...","1000000"] or ["0xDEST...",1000000] both work, but we keep it clean.
-          SPEND_ABI_PARAMS_JSON=$(node -e 'const to=process.env.INPUT_TO; const amt=process.env.INPUT_AMOUNT; process.stdout.write(JSON.stringify([to, String(amt)]))')
+          # SPEND_ABI_PARAMS_JSON='["0xDEST...","1000000"]'
+          export SPEND_ABI_PARAMS_JSON=$(node -e 'const to=process.env.INPUT_TO; const amt=process.env.INPUT_AMOUNT; process.stdout.write(JSON.stringify([to, String(amt)]))')
           echo "SPEND_ABI_PARAMS_JSON=${SPEND_ABI_PARAMS_JSON}" >> $GITHUB_ENV
 
           # Run 07 and capture stdout
