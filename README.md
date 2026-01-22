@@ -733,7 +733,7 @@ Todo **sin mocks**, **sin UI**, **sin server**, **100% reproducible**.
 - Ejecuta pagos **reales** en testnet usando **Circle Programmable Wallets**
 - Bloquea transacciones **antes** de gastar si violan reglas
 - Produce un **JSON final limpio**, listo para agentes o integraciones
-
+- In execute, Circle execution is dispatched via GitHub Actions for region-safe execution and reproducibility.
 ---
 
 ## 🧠 Arquitectura de Alto Nivel — Aegis Orchestrator (CLI)
@@ -892,14 +892,14 @@ Todo **sin mocks**, **sin UI**, **sin server**, **100% reproducible**.
 ```bash
 ### Gemini (IA)
 ```env
-GEMINI_API_KEY=AIza...
+GEMINI_API_KEY=***
 GEMINI_MODEL=gemini-1.5-flash   # opcional (tiene default)
 
 ### Circle (NO renombrar)
 env
 CIRCLE_API_KEY=***
 CIRCLE_ENTITY_SECRET_HEX=***
-CIRCLE_BASE_URL=//api.circle.com/v1/w3s
+CIRCLE_BASE_URL=https://api.circle.com/v1/w3s
 CIRCLE_BLOCKCHAIN=ARC-TESTNET
 
 ### Vault / Arc
@@ -913,7 +913,7 @@ VAULT_ADDRESS=0x...
 
 ### GitHub Actions
 env
-GITHUB_TOKEN=ghp_...
+GITHUB_TOKEN=***
 GITHUB_REPO=Soymaferlopezp/aegis
 GITHUB_WORKFLOW_FILE=circle_spend_vault.yml
 ```
@@ -1015,4 +1015,6 @@ El **Vault contract** es quien debe tener fondos, no el agente humano.
 ✅ Fase 1 — Vault & Guardrails
 ✅ Fase 2.1 — Circle Spend manual
 ✅ Fase 2.2 — Backend Orchestrator (este README)
-⏳ Fase 3 — Auditoría / El Testigo (fuera de scope)
+⏳ Fase 3 — Diseño y Frontend
+
+---
