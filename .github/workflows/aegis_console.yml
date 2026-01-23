@@ -30,6 +30,12 @@ jobs:
       - name: Install deps
         run: npm ci
 
+      - name: Init console workspace
+        run: |
+          mkdir -p .aegis_console
+          echo "${{ inputs.mode }}" > .aegis_console/mode.txt
+          echo "${{ inputs.intent }}" > .aegis_console/intent.txt
+
       - name: Init workspace
         run: |
           mkdir -p .aegis_console
@@ -46,121 +52,78 @@ jobs:
       # --- SIMULATE: run CLI, extract JSON object from mixed stdout safely
       - name: Agent simulate (extract JSON from stdout)
         id: simulate
-        continue-on-error: false
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          GEMINI_MODEL: ${{ secrets.GEMINI_MODEL }} # optional
+          GEMINI_MODEL: ${{ secrets.GEMINI_MODEL }}
           DESTINATION_ADDRESS: ${{ secrets.DESTINATION_ADDRESS }}
         run: |
+          mkdir -p .aegis_console
           set +e
           npm run agent:simulate -- "${{ inputs.intent }}" > .aegis_console/simulate.stdout.log 2> .aegis_console/simulate.stderr.log
           EXIT_CODE=$?
           echo "${EXIT_CODE}" > .aegis_console/simulate.exitcode.txt
+          set -e
 
-          node - <<'NODE'
+          node - << 'NODE'
           const fs = require("fs");
-          const outPath = ".aegis_console/simulate.stdout.log";
-          const text = fs.existsSync(outPath) ? fs.readFileSync(outPath, "utf8") : "";
 
-          function extractJsonObject(s) {
-            const start = s.indexOf("{");
-            if (start === -1) return null;
-            let depth = 0, inStr = false, esc = false;
-            for (let i = start; i < s.length; i++) {
-              const c = s[i];
-              if (inStr) {
-                if (esc) esc = false;
-                else if (c === "\\") esc = true;
-                else if (c === "\"") inStr = false;
-              } else {
-                if (c === "\"") inStr = true;
-                else if (c === "{") depth++;
-                else if (c === "}") {
-                  depth--;
-                  if (depth === 0) return s.slice(start, i + 1);
-                }
-              }
-            }
-            return null;
-          }
+          const raw = fs.existsSync(".aegis_console/simulate.stdout.log")
+            ? fs.readFileSync(".aegis_console/simulate.stdout.log", "utf8")
+            : "";
 
-          const jsonText = extractJsonObject(text);
-          if (!jsonText) {
-            fs.writeFileSync(".aegis_console/simulate.json", "");
+          // Extraer el primer JSON object bien formado desde stdout
+          const m = raw.match(/\{[\s\S]*\}/);
+          if (!m) {
+            fs.writeFileSync(".aegis_console/simulate.extract_error.log", "No JSON object found in stdout.\n" + raw.slice(0, 4000));
             process.exit(0);
           }
 
           try {
-            JSON.parse(jsonText);
-            fs.writeFileSync(".aegis_console/simulate.json", jsonText);
+            const obj = JSON.parse(m[0]);
+            fs.writeFileSync(".aegis_console/simulate.json", JSON.stringify(obj, null, 2));
           } catch (e) {
-            fs.writeFileSync(".aegis_console/simulate.json", "");
-            fs.writeFileSync(".aegis_console/simulate.extract_error.log", String(e));
+            fs.writeFileSync(".aegis_console/simulate.extract_error.log", "JSON parse failed: " + String(e) + "\n" + m[0].slice(0, 4000));
           }
           NODE
 
-          exit 0
 
       # --- VALIDATE: run CLI, extract JSON object from mixed stdout safely
       - name: Agent validate (extract JSON from stdout)
         id: validate
-        continue-on-error: false
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          GEMINI_MODEL: ${{ secrets.GEMINI_MODEL }} # optional
+          GEMINI_MODEL: ${{ secrets.GEMINI_MODEL }}
           DESTINATION_ADDRESS: ${{ secrets.DESTINATION_ADDRESS }}
-          ARC_TESTNET_RPC_PRIMARY: ${{ secrets.ARC_TESTNET_RPC_PRIMARY }}
-          VAULT_ADDRESS: ${{ secrets.VAULT_ADDRESS }}
-          ARC_EXPLORER_TX: ${{ secrets.ARC_EXPLORER_TX }}
         run: |
+          mkdir -p .aegis_console
           set +e
-          npm run agent:validate -- "${{ inputs.intent }}" > .aegis_console/validate.stdout.log 2> .aegis_console/validate.stderr.log
+          npm run agent:validate -- "${{ inputs.intent }}" > .aegis_console/simulate.stdout.log 2> .aegis_console/simulate.stderr.log
           EXIT_CODE=$?
-          echo "${EXIT_CODE}" > .aegis_console/validate.exitcode.txt
+          echo "${EXIT_CODE}" > .aegis_console/simulate.exitcode.txt
+          set -e
 
-          node - <<'NODE'
+          node - << 'NODE'
           const fs = require("fs");
-          const outPath = ".aegis_console/validate.stdout.log";
-          const text = fs.existsSync(outPath) ? fs.readFileSync(outPath, "utf8") : "";
 
-          function extractJsonObject(s) {
-            const start = s.indexOf("{");
-            if (start === -1) return null;
-            let depth = 0, inStr = false, esc = false;
-            for (let i = start; i < s.length; i++) {
-              const c = s[i];
-              if (inStr) {
-                if (esc) esc = false;
-                else if (c === "\\") esc = true;
-                else if (c === "\"") inStr = false;
-              } else {
-                if (c === "\"") inStr = true;
-                else if (c === "{") depth++;
-                else if (c === "}") {
-                  depth--;
-                  if (depth === 0) return s.slice(start, i + 1);
-                }
-              }
-            }
-            return null;
-          }
+          const raw = fs.existsSync(".aegis_console/simulate.stdout.log")
+            ? fs.readFileSync(".aegis_console/simulate.stdout.log", "utf8")
+            : "";
 
-          const jsonText = extractJsonObject(text);
-          if (!jsonText) {
-            fs.writeFileSync(".aegis_console/validate.json", "");
+          // Extraer el primer JSON object bien formado desde stdout
+          const m = raw.match(/\{[\s\S]*\}/);
+          if (!m) {
+            fs.writeFileSync(".aegis_console/simulate.extract_error.log", "No JSON object found in stdout.\n" + raw.slice(0, 4000));
             process.exit(0);
           }
 
           try {
-            JSON.parse(jsonText);
-            fs.writeFileSync(".aegis_console/validate.json", jsonText);
+            const obj = JSON.parse(m[0]);
+            fs.writeFileSync(".aegis_console/simulate.json", JSON.stringify(obj, null, 2));
           } catch (e) {
-            fs.writeFileSync(".aegis_console/validate.json", "");
-            fs.writeFileSync(".aegis_console/validate.extract_error.log", String(e));
+            fs.writeFileSync(".aegis_console/simulate.extract_error.log", "JSON parse failed: " + String(e) + "\n" + m[0].slice(0, 4000));
           }
           NODE
 
-          exit 0
 
       # --- Decide if EXECUTE should run: mode=EXECUTE AND validate.status=APPROVED_READY
       - name: Decide execute gate
@@ -534,9 +497,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: aegis-console-debug
-          path: |
-            .aegis_console/*.stdout.log
-            .aegis_console/*.stderr.log
-            .aegis_console/*.exitcode.txt
-            .aegis_console/*.extract_error.log
+          path: .aegis_console
           retention-days: 1
+
