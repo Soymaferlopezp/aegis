@@ -30,13 +30,12 @@ jobs:
       - name: Install deps
         run: npm ci
 
-      # --- Ensure we always have working dirs for outputs
       - name: Init workspace
         run: |
           mkdir -p .aegis_console
           echo '${{ inputs.mode }}' > .aegis_console/mode.txt
           python3 - << 'PY'
-          import json, os
+          import os
           intent = os.environ.get("INPUT_INTENT","")
           with open(".aegis_console/intent.txt","w",encoding="utf-8") as f:
             f.write(intent)
@@ -44,19 +43,65 @@ jobs:
         env:
           INPUT_INTENT: ${{ inputs.intent }}
 
-      # --- SIMULATE (stdout must be JSON; stderr logs)
-      - name: Agent simulate (stdout JSON)
+      # --- SIMULATE: run CLI, extract JSON object from mixed stdout safely
+      - name: Agent simulate (extract JSON from stdout)
         id: simulate
         continue-on-error: true
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GEMINI_MODEL: ${{ secrets.GEMINI_MODEL }} # optional
         run: |
-          set -e
-          npm run agent:simulate -- "${{ inputs.intent }}" 1> .aegis_console/simulate.json 2> .aegis_console/simulate.stderr.log
+          set +e
+          npm run agent:simulate -- "${{ inputs.intent }}" > .aegis_console/simulate.stdout.log 2> .aegis_console/simulate.stderr.log
+          EXIT_CODE=$?
+          echo "${EXIT_CODE}" > .aegis_console/simulate.exitcode.txt
 
-      # --- VALIDATE (stdout must be JSON; stderr logs)
-      - name: Agent validate (stdout JSON)
+          node - <<'NODE'
+          const fs = require("fs");
+          const outPath = ".aegis_console/simulate.stdout.log";
+          const text = fs.existsSync(outPath) ? fs.readFileSync(outPath, "utf8") : "";
+
+          function extractJsonObject(s) {
+            const start = s.indexOf("{");
+            if (start === -1) return null;
+            let depth = 0, inStr = false, esc = false;
+            for (let i = start; i < s.length; i++) {
+              const c = s[i];
+              if (inStr) {
+                if (esc) esc = false;
+                else if (c === "\\") esc = true;
+                else if (c === "\"") inStr = false;
+              } else {
+                if (c === "\"") inStr = true;
+                else if (c === "{") depth++;
+                else if (c === "}") {
+                  depth--;
+                  if (depth === 0) return s.slice(start, i + 1);
+                }
+              }
+            }
+            return null;
+          }
+
+          const jsonText = extractJsonObject(text);
+          if (!jsonText) {
+            fs.writeFileSync(".aegis_console/simulate.json", "");
+            process.exit(0);
+          }
+
+          try {
+            JSON.parse(jsonText);
+            fs.writeFileSync(".aegis_console/simulate.json", jsonText);
+          } catch (e) {
+            fs.writeFileSync(".aegis_console/simulate.json", "");
+            fs.writeFileSync(".aegis_console/simulate.extract_error.log", String(e));
+          }
+          NODE
+
+          exit 0
+
+      # --- VALIDATE: run CLI, extract JSON object from mixed stdout safely
+      - name: Agent validate (extract JSON from stdout)
         id: validate
         continue-on-error: true
         env:
@@ -66,10 +111,56 @@ jobs:
           VAULT_ADDRESS: ${{ secrets.VAULT_ADDRESS }}
           ARC_EXPLORER_TX: ${{ secrets.ARC_EXPLORER_TX }}
         run: |
-          set -e
-          npm run agent:validate -- "${{ inputs.intent }}" 1> .aegis_console/validate.json 2> .aegis_console/validate.stderr.log
+          set +e
+          npm run agent:validate -- "${{ inputs.intent }}" > .aegis_console/validate.stdout.log 2> .aegis_console/validate.stderr.log
+          EXIT_CODE=$?
+          echo "${EXIT_CODE}" > .aegis_console/validate.exitcode.txt
 
-      # --- Decide if EXECUTE should run: needs VALIDATE status + mode=EXECUTE
+          node - <<'NODE'
+          const fs = require("fs");
+          const outPath = ".aegis_console/validate.stdout.log";
+          const text = fs.existsSync(outPath) ? fs.readFileSync(outPath, "utf8") : "";
+
+          function extractJsonObject(s) {
+            const start = s.indexOf("{");
+            if (start === -1) return null;
+            let depth = 0, inStr = false, esc = false;
+            for (let i = start; i < s.length; i++) {
+              const c = s[i];
+              if (inStr) {
+                if (esc) esc = false;
+                else if (c === "\\") esc = true;
+                else if (c === "\"") inStr = false;
+              } else {
+                if (c === "\"") inStr = true;
+                else if (c === "{") depth++;
+                else if (c === "}") {
+                  depth--;
+                  if (depth === 0) return s.slice(start, i + 1);
+                }
+              }
+            }
+            return null;
+          }
+
+          const jsonText = extractJsonObject(text);
+          if (!jsonText) {
+            fs.writeFileSync(".aegis_console/validate.json", "");
+            process.exit(0);
+          }
+
+          try {
+            JSON.parse(jsonText);
+            fs.writeFileSync(".aegis_console/validate.json", jsonText);
+          } catch (e) {
+            fs.writeFileSync(".aegis_console/validate.json", "");
+            fs.writeFileSync(".aegis_console/validate.extract_error.log", String(e));
+          }
+          NODE
+
+          exit 0
+
+      # --- Decide if EXECUTE should run: mode=EXECUTE AND validate.status=APPROVED_READY
       - name: Decide execute gate
         id: gate
         continue-on-error: true
@@ -81,9 +172,12 @@ jobs:
           let validateStatus = "";
           try {
             if (fs.existsSync(".aegis_console/validate.json")) {
-              const v = JSON.parse(fs.readFileSync(".aegis_console/validate.json","utf8"));
-              validateStatus = String(v.status || "");
-              if (mode === "EXECUTE" && validateStatus === "APPROVED_READY") shouldExecute = true;
+              const raw = fs.readFileSync(".aegis_console/validate.json","utf8").trim();
+              if (raw) {
+                const v = JSON.parse(raw);
+                validateStatus = String(v.status || "");
+                if (mode === "EXECUTE" && validateStatus === "APPROVED_READY") shouldExecute = true;
+              }
             }
           } catch {}
           fs.writeFileSync(".aegis_console/should_execute.txt", shouldExecute ? "true" : "false");
@@ -93,27 +187,32 @@ jobs:
           console.log("shouldExecute=", shouldExecute);
           NODE
 
-      # --- Extract to/amount from simulate.json for Circle execution
+      # --- Extract to/amount from simulate.json (needed for Circle spend)
       - name: Extract spend params from simulate.json
         id: params
-        if: ${{ steps.gate.outputs != '' || always() }}
         continue-on-error: true
         run: |
           node - << 'NODE'
           const fs = require("fs");
-          if (!fs.existsSync(".aegis_console/simulate.json")) process.exit(0);
-          const s = JSON.parse(fs.readFileSync(".aegis_console/simulate.json","utf8"));
-          const to = String(s.to || "");
-          const amount = String(s.amount || "");
+          const p = ".aegis_console/simulate.json";
+          if (!fs.existsSync(p)) process.exit(0);
+
+          const raw = fs.readFileSync(p, "utf8").trim();
+          if (!raw) process.exit(0);
+
+          const s = JSON.parse(raw);
+          const to = String(s.to || "").trim();
+          const amount = String(s.amount || "").trim();
           fs.writeFileSync(".aegis_console/to.txt", to);
           fs.writeFileSync(".aegis_console/amount.txt", amount);
+
           console.log("to=", to);
           console.log("amount=", amount);
           NODE
 
-      # --- EXECUTE (Circle) inside this workflow (ONLY if gate is true)
+      # --- EXECUTE via Circle scripts ONLY if gate true
       - name: Preflight Circle env (execute only)
-        if: ${{ always() && (hashFiles('.aegis_console/should_execute.txt') != '') }}
+        if: always()
         continue-on-error: true
         run: |
           SHOULD=$(cat .aegis_console/should_execute.txt 2>/dev/null || echo "false")
@@ -137,13 +236,13 @@ jobs:
 
       - name: Circle 07_callSpend_vault.ts (execute only)
         id: run07
-        if: ${{ always() && (hashFiles('.aegis_console/should_execute.txt') != '') }}
+        if: always()
         continue-on-error: true
         env:
           CIRCLE_API_KEY: ${{ secrets.CIRCLE_API_KEY }}
           CIRCLE_ENTITY_SECRET_HEX: ${{ secrets.CIRCLE_ENTITY_SECRET_HEX }}
           CIRCLE_BASE_URL: ${{ secrets.CIRCLE_BASE_URL }}
-          CIRCLE_BLOCKCHAIN: ${{ secrets.CIRCLE_BLOCKCHAIN }}
+          CIRCLE_BLOCKCHAIN: ${{ secrets.CIRCLE_BLOCKCHAIN }} # must be ARC-TESTNET
           CIRCLE_WALLET_ID_AGENT: ${{ secrets.CIRCLE_WALLET_ID_AGENT }}
           VAULT_ADDRESS: ${{ secrets.VAULT_ADDRESS }}
         run: |
@@ -168,6 +267,7 @@ jobs:
           CIRCLE_TX_ID=$(grep -Eo 'circleTxId:\s*[A-Za-z0-9-]+' .aegis_console/run07.out | head -n 1 | sed -E 's/circleTxId:\s*//')
           if [ -z "${CIRCLE_TX_ID}" ]; then
             echo "Failed to parse circleTxId from 07 stdout"
+            echo "---- run07.out ----"
             cat .aegis_console/run07.out
             exit 1
           fi
@@ -177,7 +277,7 @@ jobs:
 
       - name: Circle 06_waitTx.ts (execute only)
         id: run06
-        if: ${{ always() && (hashFiles('.aegis_console/should_execute.txt') != '') }}
+        if: always()
         continue-on-error: true
         env:
           CIRCLE_API_KEY: ${{ secrets.CIRCLE_API_KEY }}
@@ -195,7 +295,7 @@ jobs:
 
       - name: Extract txHash (execute only)
         id: extract
-        if: ${{ always() && (hashFiles('.aegis_console/should_execute.txt') != '') }}
+        if: always()
         continue-on-error: true
         env:
           ARC_EXPLORER_TX: ${{ secrets.ARC_EXPLORER_TX }}
@@ -206,16 +306,15 @@ jobs:
             exit 0
           fi
 
-          # Primary pattern
           TX_HASH=$(grep -Eo '✅ On-chain txHash:\s*0x[0-9a-fA-F]{64}' .aegis_console/run06.out | head -n 1 | sed -E 's/✅ On-chain txHash:\s*//')
 
-          # Fallback pattern
           if [ -z "${TX_HASH}" ]; then
             TX_HASH=$(grep -Eo 'txHash=0x[0-9a-fA-F]{64}' .aegis_console/run06.out | head -n 1 | sed -E 's/txHash=//')
           fi
 
           if [ -z "${TX_HASH}" ]; then
             echo "Failed to parse txHash from 06 stdout"
+            echo "---- run06.out ----"
             cat .aegis_console/run06.out
             exit 1
           fi
@@ -296,7 +395,6 @@ jobs:
                 arcscan: arcscan || null
               };
             } else {
-              // execution attempted but no txHash parsed
               res.execute = {
                 status: "ERROR",
                 reason: "Execution attempted but txHash could not be extracted.",
