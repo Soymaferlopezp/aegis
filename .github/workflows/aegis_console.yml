@@ -50,6 +50,7 @@ jobs:
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GEMINI_MODEL: ${{ secrets.GEMINI_MODEL }} # optional
+          DESTINATION_ADDRESS: ${{ secrets.DESTINATION_ADDRESS }}
         run: |
           set +e
           npm run agent:simulate -- "${{ inputs.intent }}" > .aegis_console/simulate.stdout.log 2> .aegis_console/simulate.stderr.log
@@ -107,6 +108,7 @@ jobs:
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GEMINI_MODEL: ${{ secrets.GEMINI_MODEL }} # optional
+          DESTINATION_ADDRESS: ${{ secrets.DESTINATION_ADDRESS }}
           ARC_TESTNET_RPC_PRIMARY: ${{ secrets.ARC_TESTNET_RPC_PRIMARY }}
           VAULT_ADDRESS: ${{ secrets.VAULT_ADDRESS }}
           ARC_EXPLORER_TX: ${{ secrets.ARC_EXPLORER_TX }}
