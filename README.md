@@ -1,7 +1,7 @@
 # Aegis — Financial Guardrails for AI Agents  
 
 <p align="center">
-  <img alt="Z-Ray logo" src="frontend/public/brand/aegis.png" width="500">
+  <img alt="Z-Ray logo" src="frontend/public/brand/aegis.png" width="400">
 </p>
 
 <div align="center">
@@ -11,6 +11,178 @@
 
 </div>
 ---
+
+## What is AEGIS?
+AEGIS is a **security-first system** that enables AI agents to execute **real on-chain USDC payments** only within **strict, verifiable financial guardrails enforced on-chain**.
+
+Core principle:
+> **AI can suggest. Smart contracts decide.**
+
+---
+
+## Why this exists (Problem)
+When AI agents can trigger payments, the risk is not “bad prompts”—it’s **financial authority**.
+
+Off-chain controls (backend checks, prompt rules, UI restrictions) are insufficient because they:
+- can be bypassed,
+- can contain bugs,
+- are not independently verifiable.
+
+AEGIS moves the source of truth on-chain:
+- **The agent cannot exceed limits**
+- **Even if the agent is compromised**
+- **Even if the backend is misused**
+
+---
+
+## System Guarantee (Non-negotiable)
+AEGIS guarantees that **funds cannot move** if the Vault rejects the spend.
+
+Even if:
+- the model hallucinates,
+- the CLI is misconfigured,
+- the execution layer is triggered incorrectly,
+
+👉 **the on-chain contract is the final arbiter.**
+---
+
+## Architecture Overview (Layered)
+
+```bash
+┌────────────────────────────────────────────┐
+│                  FRONTEND                  │
+│  Landing + Agent Console (observability)   │
+│  - Read-only UX                            │
+│  - Shows evidence and state                │
+│  - Does NOT execute payments               │
+└───────────────────┬────────────────────────┘
+                    │
+                    ▼
+┌────────────────────────────────────────────┐
+│            BACKEND ORCHESTRATOR             │
+│                  (CLI)                      │
+│  - simulate / validate / execute            │
+│  - Reads on-chain Vault state               │
+│  - Produces step-by-step logs               │
+│  - Enforces a decision gate                 │
+│                                             │
+│  ❗ Does NOT override the contract         │
+└───────────────────┬────────────────────────┘
+                    │
+                    ▼
+┌────────────────────────────────────────────┐
+│            EXECUTION LAYER (Circle)         │
+│     Programmable Wallet (Agent Executor)    │
+│  - Signs the tx                             │
+│  - Calls Vault.spend()                      │
+│                                             │
+│  ❗ Has no authority to bypass guardrails  │
+└───────────────────┬────────────────────────┘
+                    │
+                    ▼
+┌────────────────────────────────────────────┐
+│          ENFORCEMENT LAYER (ON-CHAIN)       │
+│              VaultGuardrails.sol            │
+│  - maxPerTx                                 │
+│  - dailyLimit                               │
+│  - spentToday (UTC)                         │
+│  - onlyAgent                                │
+│                                            │
+│  ✅ Final source of truth                   │
+└────────────────────────────────────────────┘
+```
+---
+## Trust Boundaries
+
+[ Trusted ]
+- VaultGuardrails.sol
+- Arc chain execution
+
+[ Semi-trusted ]
+- Circle Programmable Wallets (developer-controlled)
+- GitHub Actions runner
+
+[ Untrusted by design ]
+- AI reasoning / LLM outputs
+- Prompts
+- UI rendering
+
+Mental model:
+
+* The system assumes the LLM can be wrong
+* The system assumes the agent can be compromised
+* The system assumes off-chain logic can fail
+* The system ensures on-chain limits still hold
+
+---
+
+## Components
+AEGIS currently includes:
+
+- **Smart Contracts (Arc Testnet)**
+  - Vault with on-chain financial guardrails
+  - Reproducible deploy + smoke tests
+
+- **Circle Programmable Wallets Integration**
+  - Developer-controlled agent wallet
+  - On-chain USDC transfer + contract execution
+  - GitHub Actions automation for reproducibility
+
+- **Backend Orchestrator (CLI)**
+  - Natural language intent → JSON → on-chain validation → execution gate
+  - Groq LLM for intent extraction (no authority)
+
+- **Frontend**
+  - Landing 
+  - Agent Console
+
+---
+
+## Smart Contracts — Arc Testnet (Base)
+This repository includes a Hardhat + TypeScript setup for:
+- compilation pipeline
+- Arc Testnet connectivity
+- reproducible on-chain deploy
+- smoke tests
+- deployment registry (`deployments/arcTestnet.json`)
+
+Arc Testnet transactions use **USDC** for:
+- gas fees
+- transfers
+
+---
+
+## Vault & Guardrails 
+AEGIS implements a **USDC Vault** with strict on-chain guardrails.
+
+Goal:
+- Custody USDC
+- Allow a designated **Agent Executor** to spend only within limits
+- Make violations impossible via contract enforcement
+
+Key guarantee:
+
+> A malicious, buggy, or compromised agent **cannot** violate on-chain limits.
+
+---
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
