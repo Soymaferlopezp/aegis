@@ -420,6 +420,7 @@ jobs:
         run: |
           node - << 'NODE'
           const fs = require("fs");
+
           const p = "console_result.json";
           if (!fs.existsSync(p)) {
             console.log("No console_result.json found.");
@@ -431,10 +432,9 @@ jobs:
           const mode = r.mode || "UNKNOWN";
           const intent = (r.intent || "").trim();
 
+          const sim = r.simulate || null;
           const v = r.validate || null;
           const vault = v?.vault || null;
-
-          const sim = r.simulate || null;
           const exe = r.execute || null;
 
           console.log("========================================");
@@ -444,6 +444,7 @@ jobs:
           console.log(`Intent: ${intent || "(empty)"}`);
           console.log("");
 
+          // SIMULATE
           if (sim) {
             console.log("SIMULATE");
             console.log(`- to:       ${sim.to ?? "-"}`);
@@ -456,6 +457,7 @@ jobs:
             console.log("");
           }
 
+          // VALIDATE
           if (v) {
             console.log("VALIDATE");
             console.log(`- status: ${v.status ?? "-"}`);
@@ -472,29 +474,41 @@ jobs:
             console.log("");
           }
 
+          // EXECUTE (only meaningful in EXECUTE mode)
           if (mode === "EXECUTE") {
             console.log("EXECUTE");
+
             if (!exe) {
-              console.log("- (no output)");
+              console.log("- No execution data present.");
             } else if (exe.status === "APPROVED") {
-              console.log(`- status:     APPROVED`);
-              console.log(`- circleTxId: ${exe.circleTxId ?? "-"}`);
-              console.log(`- txHash:     ${exe.txHash ?? "-"}`);
-              console.log(`- arcscan:    ${exe.arcscan ?? "-"}`);
+              console.log("- status: APPROVED");
+
+              if (exe.txHash) {
+                console.log(`- txHash:  ${exe.txHash}`);
+                console.log(`- arcscan: ${exe.arcscan ?? "-"}`);
+              } else {
+                console.log("- Execution approved but txHash missing (unexpected).");
+              }
+
+              if (exe.circleTxId) {
+                console.log(`- circleTxId: ${exe.circleTxId}`);
+              }
             } else if (exe.status === "BLOCKED") {
-              console.log(`- status: BLOCKED`);
+              console.log("- status: BLOCKED");
               console.log(`- reason: ${exe.reason ?? "-"}`);
-              console.log(`- note:   No execution occurred. Funds did not move.`);
+              console.log("- note:   No execution occurred. Funds did not move.");
             } else {
               console.log(`- status: ${exe.status ?? "UNKNOWN"}`);
               console.log(`- reason: ${exe.reason ?? "-"}`);
             }
+
             console.log("");
           }
 
           console.log("Artifact: aegis-console-result / console_result.json");
           console.log("========================================");
           NODE
+
 
       - name: Summary (GitHub Step Summary)
         if: always()
