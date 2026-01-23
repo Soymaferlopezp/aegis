@@ -91,6 +91,7 @@ jobs:
       - name: Agent validate (extract JSON from stdout)
         id: validate
         env:
+          ARC_TESTNET_RPC_PRIMARY: ${{ secrets.ARC_TESTNET_RPC_PRIMARY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GEMINI_MODEL: ${{ secrets.GEMINI_MODEL }}
           DESTINATION_ADDRESS: ${{ secrets.DESTINATION_ADDRESS }}
