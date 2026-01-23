@@ -1,8 +1,10 @@
+// frontend/lib/console/types.ts
+
 export type ConsoleMode = "SIMULATE" | "VALIDATE" | "EXECUTE";
 
 export type SimulateOutput = {
   to: string;
-  amount: string;   // base units (e.g., 1000000 = 1 USDC if 6 decimals)
+  amount: string; // minor units (6 decimals) as string
   currency: "USDC" | string;
   reason: string;
 };
@@ -10,16 +12,43 @@ export type SimulateOutput = {
 export type ValidateOutput = {
   status: "APPROVED_READY" | "BLOCKED";
   reason: string;
+
+  // optional, but we display if present
+  to?: string;
+  amount?: string;
+  currency?: "USDC" | string;
+
+  // model reason (if your backend provides it)
+  reason_model?: string;
+
   vault: {
     maxPerTx: string;
     dailyLimit: string;
-    spentToday: string; // alias for spentInCurrentDay()
+    spentToday: string; // UI alias (getter is spentInCurrentDay)
   };
 };
 
-export type ExecuteOutput =
-  | { status: "APPROVED"; txHash: string; arcscan: string }
-  | { status: "BLOCKED"; reason: string };
+export type ExecuteOutput = {
+  status: "APPROVED" | "BLOCKED" | "ERROR";
+  reason?: string;
+  message?: string;
+
+  txHash?: string;
+  arcscan?: string;
+  circleTxId?: string;
+};
+
+export type EvidenceSnapshot = {
+  vault?: { maxPerTx?: string; dailyLimit?: string; spentToday?: string };
+  decision?: { status?: string; reason?: string };
+  execution?: {
+    status?: string;
+    txHash?: string;
+    arcscan?: string;
+    circleTxId?: string;
+    message?: string;
+  };
+};
 
 export type TimelineStage =
   | "USER_INTENT"
@@ -28,53 +57,30 @@ export type TimelineStage =
   | "EXECUTION"
   | "ERROR";
 
-export type TimelineEventBase = {
+type TimelineBase = {
   id: string;
-  stage: TimelineStage;
-  title: string; // EN label visible
+  title: string;
   timestampISO: string;
 };
 
-export type IntentEvent = TimelineEventBase & {
-  stage: "USER_INTENT";
-  intent: string;
-};
-
-export type SimulateEvent = TimelineEventBase & {
-  stage: "AGENT_INTERPRETATION";
-  output: SimulateOutput;
-};
-
-export type ValidateEvent = TimelineEventBase & {
-  stage: "VAULT_VALIDATION";
-  output: ValidateOutput;
-};
-
-export type ExecuteEvent = TimelineEventBase & {
-  stage: "EXECUTION";
-  output: ExecuteOutput;
-};
-
-export type ErrorEvent = TimelineEventBase & {
-  stage: "ERROR";
-  error: string; // raw error
-};
-
-export type TimelineEvent = IntentEvent | SimulateEvent | ValidateEvent | ExecuteEvent | ErrorEvent;
-
-export type EvidenceSnapshot = {
-  vault?: {
-    maxPerTx?: string;
-    dailyLimit?: string;
-    spentToday?: string;
-  };
-  decision?: {
-    status?: "APPROVED_READY" | "BLOCKED" | "APPROVED";
-    reason?: string;
-  };
-  execution?: {
-    txHash?: string;
-    arcscan?: string;
-    message?: string; // EN no-execution message
-  };
-};
+export type TimelineEvent =
+  | (TimelineBase & {
+      stage: "USER_INTENT";
+      intent: string;
+    })
+  | (TimelineBase & {
+      stage: "AGENT_INTERPRETATION";
+      output: SimulateOutput;
+    })
+  | (TimelineBase & {
+      stage: "VAULT_VALIDATION";
+      output: ValidateOutput;
+    })
+  | (TimelineBase & {
+      stage: "EXECUTION";
+      output: ExecuteOutput;
+    })
+  | (TimelineBase & {
+      stage: "ERROR";
+      error: string;
+    });

@@ -1,7 +1,7 @@
 import "dotenv/config";
 import { readVaultState } from "../vault/readState";
+import { llmSimulate } from "../llm/client";
 import { buildSimulatePrompt } from "../gemini/prompt";
-import { geminiSimulate } from "../gemini/client";
 import { validateAgainstVault } from "../validate";
 import { runCircleSpendViaGitHubActions } from "../circle/githubActions";
 
@@ -40,15 +40,15 @@ async function main() {
     spentToday: vault.spentToday,
   });
 
-  // 2) Gemini simulate -> strict JSON decision
+  // 2) LLM simulate -> strict JSON decision
   const merchant = process.env.DESTINATION_ADDRESS ?? process.env.SMOKE_RECIPIENT_ADDRESS ?? "";
   if (!merchant) throw new Error("Missing DESTINATION_ADDRESS (or SMOKE_RECIPIENT_ADDRESS) for merchant");
 
   const prompt = buildSimulatePrompt({ intent, merchant });
 
-  step("gemini.request");
-  const decision = await geminiSimulate(prompt);
-  step("gemini.decision.ok", { to: decision.to, amount: decision.amount });
+  step("llm.request");
+  const decision = await llmSimulate(prompt);
+  step("llm.decision.ok", { to: decision.to, amount: decision.amount });
 
   // 3) Validate decision against vault limits
   const verdict = validateAgainstVault({ amount: decision.amount, vault });

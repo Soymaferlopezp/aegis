@@ -31,12 +31,31 @@ async function postJSON<T>(url: string, body: unknown): Promise<T> {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
+
   const data = await r.json().catch(() => ({}));
+
   if (!r.ok) {
-    throw new Error(typeof data?.details === "string" ? data.details : JSON.stringify(data));
+    // Prefer backend "error"/"reason"/"details" if present
+    const msg =
+      (typeof (data as any)?.error === "string" && (data as any).error) ||
+      (typeof (data as any)?.reason === "string" && (data as any).reason) ||
+      (typeof (data as any)?.details === "string" && (data as any).details) ||
+      JSON.stringify(data);
+
+    throw new Error(msg);
   }
+
   return data as T;
 }
+
+type ExecuteOutput = {
+  status: "APPROVED" | "BLOCKED" | "ERROR";
+  reason?: string;
+  message?: string;
+  txHash?: string;
+  arcscan?: string;
+  circleTxId?: string;
+};
 
 export default function ConsolePage() {
   const [mode, setMode] = useState<ConsoleMode>("SIMULATE");
@@ -53,7 +72,8 @@ export default function ConsolePage() {
         evidence.vault?.spentToday ||
         evidence.decision?.status ||
         evidence.execution?.txHash ||
-        evidence.execution?.message
+        evidence.execution?.message ||
+        evidence.execution?.circleTxId
     );
   }, [evidence]);
 
@@ -78,10 +98,11 @@ export default function ConsolePage() {
       },
     ]);
 
-    setDraftIntent(""); // clear input immediately (UX request)
+    // UX: clear input immediately
+    setDraftIntent("");
 
     try {
-      // SIMULATE (always for narrative)
+      // 2) SIMULATE (always for narrative)
       const sim = await postJSON<SimulateOutput>("/api/simulate", { intent });
 
       setEvents((prev) => [
@@ -96,11 +117,12 @@ export default function ConsolePage() {
       ]);
 
       if (mode === "SIMULATE") {
-        setEvidence({}); // no vault/decision without validate
+        // In SIMULATE mode we intentionally do not show vault/decision/execution.
+        setEvidence({});
         return;
       }
 
-      // VALIDATE (server reads vault + deterministic gate)
+      // 3) VALIDATE (server reads vault + deterministic gate) — DO NOT CHANGE CONTRACT
       const val = await postJSON<ValidateOutput>("/api/validate", { simulate: sim });
 
       setEvents((prev) => [
@@ -114,6 +136,7 @@ export default function ConsolePage() {
         },
       ]);
 
+      // Update evidence with validate result immediately
       setEvidence({
         vault: {
           maxPerTx: val.vault.maxPerTx,
@@ -125,6 +148,7 @@ export default function ConsolePage() {
           reason: val.reason,
         },
         execution: {
+          status: val.status === "BLOCKED" ? "BLOCKED" : undefined,
           message:
             val.status === "BLOCKED"
               ? "No execution occurred. Funds did not move."
@@ -132,19 +156,96 @@ export default function ConsolePage() {
         },
       });
 
-      if (mode === "EXECUTE") {
-        // Not implemented until Checkpoint 3 (GH Actions).
-        setEvents((prev) => [
-          ...prev,
-          {
-            id: `${runId}_execute_placeholder`,
-            stage: "EXECUTION",
-            title: STAGE_LABELS.EXECUTION,
-            timestampISO: nowISO(),
-            output: { status: "BLOCKED", reason: "Execution is implemented in Checkpoint 3." } as any,
-          },
-        ]);
+      if (mode !== "EXECUTE") return;
+
+      // 4) EXECUTE (only if approved)
+// 4) EXECUTE (only if approved)
+if (mode !== "EXECUTE") return;
+
+if (val.status === "BLOCKED") {
+  // Do not call /api/execute. Deterministic gate.
+  const blockedPayload = {
+    status: "BLOCKED",
+    reason: val.reason,
+    message: "No execution occurred. Funds did not move.",
+  };
+
+  setEvents((prev) => [
+    ...prev,
+    {
+      id: `${runId}_execute_blocked`,
+      stage: "EXECUTION",
+      title: STAGE_LABELS.EXECUTION,
+      timestampISO: nowISO(),
+      output: blockedPayload as any,
+    },
+  ]);
+
+  // Evidence already set above, but ensure message is explicit
+  setEvidence((prev) => ({
+    ...prev,
+    execution: {
+      status: "BLOCKED",
+      reason: val.reason,
+      message: "No execution occurred. Funds did not move.",
+    },
+  }));
+
+  return;
+}
+
+const exe = await postJSON<ExecuteOutput>("/api/execute", {
+  intent,
+  simulate: sim,
+});
+
+// Build a juror-proof payload (no internal notes)
+const exePayload =
+  exe.status === "APPROVED"
+    ? {
+        status: "APPROVED",
+        circleTxId: exe.circleTxId,
+        txHash: exe.txHash,
+        arcscan: exe.arcscan,
       }
+    : exe.status === "BLOCKED"
+    ? {
+        status: "BLOCKED",
+        reason: exe.reason || "Blocked by on-chain validation gate.",
+        message: "No execution occurred. Funds did not move.",
+      }
+    : {
+        status: "ERROR",
+        reason: exe.reason || "Execution failed.",
+        message: exe.message || "Execution may have failed. See logs.",
+      };
+
+setEvents((prev) => [
+  ...prev,
+  {
+    id: `${runId}_execute`,
+    stage: "EXECUTION",
+    title: STAGE_LABELS.EXECUTION,
+    timestampISO: nowISO(),
+    output: exePayload as any,
+  },
+]);
+
+setEvidence((prev) => ({
+  ...prev,
+  execution: {
+    status: exe.status,
+    reason: exe.reason,
+    message:
+      exe.status === "BLOCKED"
+        ? "No execution occurred. Funds did not move."
+        : exe.message,
+    txHash: exe.txHash,
+    arcscan: exe.arcscan,
+    circleTxId: exe.circleTxId,
+  } as any,
+}));
+
     } catch (err: any) {
       setEvents((prev) => [
         ...prev,
@@ -156,6 +257,16 @@ export default function ConsolePage() {
           error: String(err?.message || err),
         },
       ]);
+
+      // Also reflect in evidence if useful
+      setEvidence((prev) => ({
+        ...prev,
+        execution: {
+          status: "ERROR",
+          reason: "Request failed.",
+          message: String(err?.message || err),
+        },
+      }));
     } finally {
       setRunning(false);
     }
@@ -213,11 +324,7 @@ export default function ConsolePage() {
         onRun={handleRun}
       />
 
-      <EvidenceDrawer
-        open={drawerOpen}
-        onClose={() => setDrawerOpen(false)}
-        evidence={evidence}
-      />
+      <EvidenceDrawer open={drawerOpen} onClose={() => setDrawerOpen(false)} evidence={evidence} />
     </div>
   );
 }

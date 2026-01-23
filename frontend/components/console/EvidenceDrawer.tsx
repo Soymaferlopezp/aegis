@@ -30,7 +30,7 @@ export default function EvidenceDrawer({
           <button
             type="button"
             onClick={onClose}
-            className="rounded-xl border border-[var(--border)] bg-[rgba(17,24,39,0.20)] px-3 py-2 text-[12px] text-[var(--muted)]"
+            className="rounded-xl border border-[var(--border)] bg-[rgba(17,24,39,0.20)] px-3 py-2 text-[12px] text-[var(--muted)] transition hover:bg-[rgba(17,24,39,0.30)]"
           >
             Close
           </button>

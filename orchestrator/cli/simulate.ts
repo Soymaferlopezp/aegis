@@ -1,13 +1,7 @@
 import "dotenv/config";
 import { step, errorLog } from "../logger";
+import { llmSimulate } from "../llm/client";
 import { buildSimulatePrompt } from "../gemini/prompt";
-import { geminiSimulate } from "../gemini/client";
-
-function mustEnv(name: string): string {
-  const v = process.env[name];
-  if (!v) throw new Error(`Missing env var: ${name}`);
-  return v;
-}
 
 async function main() {
   const intent = process.argv.slice(2).join(" ").trim();
@@ -21,11 +15,11 @@ async function main() {
   step("simulate.start", { intent });
 
   const prompt = buildSimulatePrompt({ intent, merchant });
-  step("gemini.request");
+  step("llm.request");
 
-  const decision = await geminiSimulate(prompt);
+  const decision = await llmSimulate(prompt);
 
-  step("gemini.decision.ok", { to: decision.to, amount: decision.amount });
+  step("llm.decision.ok", { to: decision.to, amount: decision.amount });
 
   // stdout: ONLY JSON
   process.stdout.write(JSON.stringify(decision) + "\n");

@@ -1,7 +1,7 @@
 import "dotenv/config";
 import { step, errorLog } from "../logger";
+import { llmSimulate } from "../llm/client";
 import { buildSimulatePrompt } from "../gemini/prompt";
-import { geminiSimulate } from "../gemini/client";
 import { readVaultState } from "../vault/readState";
 import { validateAgainstVault } from "../validate";
 
@@ -24,10 +24,14 @@ async function main() {
   });
 
   const prompt = buildSimulatePrompt({ intent, merchant });
-  step("gemini.request");
+  step("llm.request");
 
-  const modelDecision = await geminiSimulate(prompt)
-  step("gemini.decision.ok", { to: modelDecision.to, amount: modelDecision.amount });
+  const modelDecision = await llmSimulate(prompt);
+
+  step("llm.decision.ok", {
+    to: modelDecision.to,
+    amount: modelDecision.amount
+  });
 
   const verdict = validateAgainstVault({ amount: modelDecision.amount, vault });
 

@@ -9,14 +9,26 @@ const VAULT_ABI = [
   "function spentInCurrentDay() view returns (uint256)",
 ];
 
+type SimulateLike = { amount?: string; to?: string; currency?: string; reason?: string };
+
 export async function POST(req: Request) {
   try {
-    const { simulate } = (await req.json()) as {
-      simulate?: { amount?: string };
+    const body = (await req.json().catch(() => ({}))) as {
+      intent?: string;
+      simulate?: SimulateLike;
     };
 
-    const amountStr = simulate?.amount;
+    const amountStr = body?.simulate?.amount;
+
+    // ✅ Contract: validate is based on simulate.amount (deterministic, on-chain read)
     if (!amountStr || typeof amountStr !== "string") {
+      // Si vino intent pero no simulate, explicamos el contrato sin romper UX.
+      if (body?.intent) {
+        return NextResponse.json(
+          { error: "Missing simulate.amount", details: "Validate expects { simulate } from /api/simulate." },
+          { status: 400 }
+        );
+      }
       return NextResponse.json({ error: "Missing simulate.amount" }, { status: 400 });
     }
 
@@ -36,7 +48,7 @@ export async function POST(req: Request) {
     const [maxPerTx, dailyLimit, spentToday] = await Promise.all([
       vault.maxPerTx(),
       vault.dailyLimit(),
-      vault.spentInCurrentDay(), // alias in UI as spentToday
+      vault.spentInCurrentDay(),
     ]);
 
     const amount = BigInt(amountStr);
@@ -44,8 +56,6 @@ export async function POST(req: Request) {
     const daily = BigInt(dailyLimit.toString());
     const spent = BigInt(spentToday.toString());
 
-    // Deterministic gate: EXACTLY the type of check the orchestrator would do.
-    // UI never approves; server returns observed + computed gate result.
     let status: "APPROVED_READY" | "BLOCKED" = "APPROVED_READY";
     let reason = "Within configured vault limits.";
 
@@ -63,7 +73,7 @@ export async function POST(req: Request) {
       vault: {
         maxPerTx: max.toString(),
         dailyLimit: daily.toString(),
-        spentToday: spent.toString(), // UI label
+        spentToday: spent.toString(),
       },
     });
   } catch (err: any) {

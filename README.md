@@ -1,4 +1,22 @@
 # Aegis — Financial Guardrails for AI Agents  
+
+<p align="center">
+  <img alt="Z-Ray logo" src="frontend/public/brand/aegis.png" width="500">
+</p>
+
+<div align="center">
+
+[**Live Demo**]()  
+[**Video Demo**]()
+
+</div>
+---
+
+
+
+
+
+---
 **Smart Contracts · Arc Testnet**
 
 Repositorio base para el desarrollo y deploy de contratos inteligentes en **Arc Testnet**, usando **Hardhat + TypeScript**.
