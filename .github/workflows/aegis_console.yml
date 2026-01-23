@@ -528,3 +528,15 @@ jobs:
             echo ""
             echo "> Observational UI. Enforcement happens on-chain."
           } >> $GITHUB_STEP_SUMMARY
+
+      - name: Upload debug logs (always)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: aegis-console-debug
+          path: |
+            .aegis_console/*.stdout.log
+            .aegis_console/*.stderr.log
+            .aegis_console/*.exitcode.txt
+            .aegis_console/*.extract_error.log
+          retention-days: 1
