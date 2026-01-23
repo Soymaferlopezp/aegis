@@ -472,36 +472,25 @@ jobs:
             console.log("");
           }
 
-        if (mode === "EXECUTE") {
-          console.log("EXECUTE");
-
-          if (!exe) {
-            console.log("- No execution data present.");
-          } else if (exe.status === "APPROVED") {
-            console.log("- status: APPROVED");
-
-            if (exe.txHash) {
-              console.log(`- txHash:  ${exe.txHash}`);
-              console.log(`- arcscan: ${exe.arcscan}`);
+          if (mode === "EXECUTE") {
+            console.log("EXECUTE");
+            if (!exe) {
+              console.log("- (no output)");
+            } else if (exe.status === "APPROVED") {
+              console.log(`- status:     APPROVED`);
+              console.log(`- circleTxId: ${exe.circleTxId ?? "-"}`);
+              console.log(`- txHash:     ${exe.txHash ?? "-"}`);
+              console.log(`- arcscan:    ${exe.arcscan ?? "-"}`);
+            } else if (exe.status === "BLOCKED") {
+              console.log(`- status: BLOCKED`);
+              console.log(`- reason: ${exe.reason ?? "-"}`);
+              console.log(`- note:   No execution occurred. Funds did not move.`);
             } else {
-              console.log("- Execution approved but txHash missing (unexpected).");
+              console.log(`- status: ${exe.status ?? "UNKNOWN"}`);
+              console.log(`- reason: ${exe.reason ?? "-"}`);
             }
-
-            if (exe.circleTxId) {
-              console.log(`- circleTxId: ${exe.circleTxId}`);
-            }
-          } else if (exe.status === "BLOCKED") {
-            console.log("- status: BLOCKED");
-            console.log(`- reason: ${exe.reason ?? "-"}`);
-            console.log("- note:   No execution occurred. Funds did not move.");
-          } else {
-            console.log(`- status: ${exe.status ?? "UNKNOWN"}`);
-            console.log(`- reason: ${exe.reason ?? "-"}`);
+            console.log("");
           }
-
-          console.log("");
-        }
-
 
           console.log("Artifact: aegis-console-result / console_result.json");
           console.log("========================================");
