@@ -414,3 +414,98 @@ jobs:
           name: aegis-console-result
           path: console_result.json
           retention-days: 1
+
+      - name: Summary (human-readable)
+        if: always()
+        run: |
+          node - << 'NODE'
+          const fs = require("fs");
+          const p = "console_result.json";
+          if (!fs.existsSync(p)) {
+            console.log("No console_result.json found.");
+            process.exit(0);
+          }
+
+          const r = JSON.parse(fs.readFileSync(p, "utf8"));
+
+          const mode = r.mode || "UNKNOWN";
+          const intent = (r.intent || "").trim();
+
+          const v = r.validate || null;
+          const vault = v?.vault || null;
+
+          const sim = r.simulate || null;
+          const exe = r.execute || null;
+
+          console.log("========================================");
+          console.log("AEGIS Agent Console — Workflow Summary");
+          console.log("========================================");
+          console.log(`Mode:   ${mode}`);
+          console.log(`Intent: ${intent || "(empty)"}`);
+          console.log("");
+
+          if (sim) {
+            console.log("SIMULATE");
+            console.log(`- to:       ${sim.to ?? "-"}`);
+            console.log(`- amount:   ${sim.amount ?? "-"}`);
+            console.log(`- currency: ${sim.currency ?? "-"}`);
+            console.log(`- reason:   ${sim.reason ?? "-"}`);
+            console.log("");
+          } else {
+            console.log("SIMULATE: (no output)");
+            console.log("");
+          }
+
+          if (v) {
+            console.log("VALIDATE");
+            console.log(`- status: ${v.status ?? "-"}`);
+            console.log(`- reason: ${v.reason ?? "-"}`);
+            if (vault) {
+              console.log("VAULT STATE");
+              console.log(`- maxPerTx:    ${vault.maxPerTx ?? "-"}`);
+              console.log(`- dailyLimit:  ${vault.dailyLimit ?? "-"}`);
+              console.log(`- spentToday:  ${vault.spentToday ?? "-"}`);
+            }
+            console.log("");
+          } else {
+            console.log("VALIDATE: (no output)");
+            console.log("");
+          }
+
+          if (mode === "EXECUTE") {
+            console.log("EXECUTE");
+            if (!exe) {
+              console.log("- (no output)");
+            } else if (exe.status === "APPROVED") {
+              console.log(`- status:     APPROVED`);
+              console.log(`- circleTxId: ${exe.circleTxId ?? "-"}`);
+              console.log(`- txHash:     ${exe.txHash ?? "-"}`);
+              console.log(`- arcscan:    ${exe.arcscan ?? "-"}`);
+            } else if (exe.status === "BLOCKED") {
+              console.log(`- status: BLOCKED`);
+              console.log(`- reason: ${exe.reason ?? "-"}`);
+              console.log(`- note:   No execution occurred. Funds did not move.`);
+            } else {
+              console.log(`- status: ${exe.status ?? "UNKNOWN"}`);
+              console.log(`- reason: ${exe.reason ?? "-"}`);
+            }
+            console.log("");
+          }
+
+          console.log("Artifact: aegis-console-result / console_result.json");
+          console.log("========================================");
+          NODE
+
+      - name: Summary (GitHub Step Summary)
+        if: always()
+        run: |
+          {
+            echo "## AEGIS Agent Console — Summary"
+            echo ""
+            echo "**Artifact:** \`aegis-console-result / console_result.json\`"
+            echo ""
+            echo "- **Mode:** \`${{ inputs.mode }}\`"
+            echo "- **Intent:** \`${{ inputs.intent }}\`"
+            echo ""
+            echo "> Observational UI. Enforcement happens on-chain."
+          } >> $GITHUB_STEP_SUMMARY
