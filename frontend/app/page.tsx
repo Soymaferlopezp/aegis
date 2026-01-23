@@ -34,7 +34,7 @@ export default function Page() {
             </div>
 
             <div className="mt-8 flex flex-wrap gap-3">
-              <Button href="#try-agent" variant="primary">
+              <Button href="/console" variant="primary">
                 Try the Agent
               </Button>
               <Button href="#how-it-works" variant="secondary">

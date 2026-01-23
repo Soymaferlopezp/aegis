@@ -43,7 +43,7 @@ export default function Navbar() {
           </nav>
 
           <div className="flex items-center gap-3">
-            <Button href="#try-agent" variant="primary" size="sm">
+            <Button href="/console" variant="primary" size="sm">
               Try the Agent
             </Button>
           </div>

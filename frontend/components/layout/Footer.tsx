@@ -31,7 +31,7 @@ export default function Footer() {
             {/* Center CTA (true center) */}
             <div className="md:col-span-4 md:flex md:justify-center">
               <div className="flex">
-                <Button href="#try-agent" variant="primary">
+                <Button href="/console" variant="primary">
                   Go! Try the Agent
                 </Button>
               </div>
@@ -67,7 +67,7 @@ export default function Footer() {
 
           {/* Bottom: signature + copyright */}
           <div className="mt-14 border-t border-[var(--border)] pt-8">
-            <div className="flex flex-col gap-2 text-[12px] text-[var(--muted)] md:flex-row md:items-center md:justify-between">
+            <div className="flex flex-col gap-2 text-[14px] text-[var(--muted)] md:flex-row md:items-center md:justify-between">
               <div>Built with 🤍 by Blockbears</div>
               <div>©2026 All rights reserved - Blockbears</div>
             </div>

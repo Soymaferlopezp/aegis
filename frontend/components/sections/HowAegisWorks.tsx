@@ -31,7 +31,7 @@ export default function HowAegisWorks() {
             </P>
 
             <div className="mt-7 flex flex-wrap gap-3">
-              <Button href="#try-agent" variant="primary">
+              <Button href="/console" variant="primary">
                 Try the Agent
               </Button>
             </div>

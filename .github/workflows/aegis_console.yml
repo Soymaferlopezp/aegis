@@ -1,0 +1,318 @@
+name: aegis-console
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "SIMULATE | VALIDATE | EXECUTE"
+        required: true
+        type: string
+      intent:
+        description: "User intent (free text)"
+        required: true
+        type: string
+
+jobs:
+  console:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install deps
+        run: npm ci
+
+      # --- Ensure we always have working dirs for outputs
+      - name: Init workspace
+        run: |
+          mkdir -p .aegis_console
+          echo '${{ inputs.mode }}' > .aegis_console/mode.txt
+          python3 - << 'PY'
+          import json, os
+          intent = os.environ.get("INPUT_INTENT","")
+          with open(".aegis_console/intent.txt","w",encoding="utf-8") as f:
+            f.write(intent)
+          PY
+        env:
+          INPUT_INTENT: ${{ inputs.intent }}
+
+      # --- SIMULATE (stdout must be JSON; stderr logs)
+      - name: Agent simulate (stdout JSON)
+        id: simulate
+        continue-on-error: true
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GEMINI_MODEL: ${{ secrets.GEMINI_MODEL }} # optional
+        run: |
+          set -e
+          npm run agent:simulate -- "${{ inputs.intent }}" 1> .aegis_console/simulate.json 2> .aegis_console/simulate.stderr.log
+
+      # --- VALIDATE (stdout must be JSON; stderr logs)
+      - name: Agent validate (stdout JSON)
+        id: validate
+        continue-on-error: true
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GEMINI_MODEL: ${{ secrets.GEMINI_MODEL }} # optional
+          ARC_TESTNET_RPC_PRIMARY: ${{ secrets.ARC_TESTNET_RPC_PRIMARY }}
+          VAULT_ADDRESS: ${{ secrets.VAULT_ADDRESS }}
+          ARC_EXPLORER_TX: ${{ secrets.ARC_EXPLORER_TX }}
+        run: |
+          set -e
+          npm run agent:validate -- "${{ inputs.intent }}" 1> .aegis_console/validate.json 2> .aegis_console/validate.stderr.log
+
+      # --- Decide if EXECUTE should run: needs VALIDATE status + mode=EXECUTE
+      - name: Decide execute gate
+        id: gate
+        continue-on-error: true
+        run: |
+          node - << 'NODE'
+          const fs = require("fs");
+          const mode = fs.readFileSync(".aegis_console/mode.txt","utf8").trim();
+          let shouldExecute = false;
+          let validateStatus = "";
+          try {
+            if (fs.existsSync(".aegis_console/validate.json")) {
+              const v = JSON.parse(fs.readFileSync(".aegis_console/validate.json","utf8"));
+              validateStatus = String(v.status || "");
+              if (mode === "EXECUTE" && validateStatus === "APPROVED_READY") shouldExecute = true;
+            }
+          } catch {}
+          fs.writeFileSync(".aegis_console/should_execute.txt", shouldExecute ? "true" : "false");
+          fs.writeFileSync(".aegis_console/validate_status.txt", validateStatus);
+          console.log("mode=", mode);
+          console.log("validateStatus=", validateStatus);
+          console.log("shouldExecute=", shouldExecute);
+          NODE
+
+      # --- Extract to/amount from simulate.json for Circle execution
+      - name: Extract spend params from simulate.json
+        id: params
+        if: ${{ steps.gate.outputs != '' || always() }}
+        continue-on-error: true
+        run: |
+          node - << 'NODE'
+          const fs = require("fs");
+          if (!fs.existsSync(".aegis_console/simulate.json")) process.exit(0);
+          const s = JSON.parse(fs.readFileSync(".aegis_console/simulate.json","utf8"));
+          const to = String(s.to || "");
+          const amount = String(s.amount || "");
+          fs.writeFileSync(".aegis_console/to.txt", to);
+          fs.writeFileSync(".aegis_console/amount.txt", amount);
+          console.log("to=", to);
+          console.log("amount=", amount);
+          NODE
+
+      # --- EXECUTE (Circle) inside this workflow (ONLY if gate is true)
+      - name: Preflight Circle env (execute only)
+        if: ${{ always() && (hashFiles('.aegis_console/should_execute.txt') != '') }}
+        continue-on-error: true
+        run: |
+          SHOULD=$(cat .aegis_console/should_execute.txt 2>/dev/null || echo "false")
+          if [ "$SHOULD" != "true" ]; then
+            echo "Skip preflight (should_execute=false)"
+            exit 0
+          fi
+
+          test -n "${CIRCLE_API_KEY}" || (echo "Missing CIRCLE_API_KEY" && exit 1)
+          test -n "${CIRCLE_ENTITY_SECRET_HEX}" || (echo "Missing CIRCLE_ENTITY_SECRET_HEX" && exit 1)
+          test -n "${CIRCLE_WALLET_ID_AGENT}" || (echo "Missing CIRCLE_WALLET_ID_AGENT" && exit 1)
+          test -n "${VAULT_ADDRESS}" || (echo "Missing VAULT_ADDRESS" && exit 1)
+          test -n "${CIRCLE_BLOCKCHAIN}" || (echo "Missing CIRCLE_BLOCKCHAIN" && exit 1)
+          echo "OK env present."
+        env:
+          CIRCLE_API_KEY: ${{ secrets.CIRCLE_API_KEY }}
+          CIRCLE_ENTITY_SECRET_HEX: ${{ secrets.CIRCLE_ENTITY_SECRET_HEX }}
+          CIRCLE_WALLET_ID_AGENT: ${{ secrets.CIRCLE_WALLET_ID_AGENT }}
+          VAULT_ADDRESS: ${{ secrets.VAULT_ADDRESS }}
+          CIRCLE_BLOCKCHAIN: ${{ secrets.CIRCLE_BLOCKCHAIN }}
+
+      - name: Circle 07_callSpend_vault.ts (execute only)
+        id: run07
+        if: ${{ always() && (hashFiles('.aegis_console/should_execute.txt') != '') }}
+        continue-on-error: true
+        env:
+          CIRCLE_API_KEY: ${{ secrets.CIRCLE_API_KEY }}
+          CIRCLE_ENTITY_SECRET_HEX: ${{ secrets.CIRCLE_ENTITY_SECRET_HEX }}
+          CIRCLE_BASE_URL: ${{ secrets.CIRCLE_BASE_URL }}
+          CIRCLE_BLOCKCHAIN: ${{ secrets.CIRCLE_BLOCKCHAIN }}
+          CIRCLE_WALLET_ID_AGENT: ${{ secrets.CIRCLE_WALLET_ID_AGENT }}
+          VAULT_ADDRESS: ${{ secrets.VAULT_ADDRESS }}
+        run: |
+          SHOULD=$(cat .aegis_console/should_execute.txt 2>/dev/null || echo "false")
+          if [ "$SHOULD" != "true" ]; then
+            echo "Skip execute (should_execute=false)"
+            exit 0
+          fi
+
+          TO=$(cat .aegis_console/to.txt 2>/dev/null || true)
+          AMT=$(cat .aegis_console/amount.txt 2>/dev/null || true)
+          if [ -z "$TO" ] || [ -z "$AMT" ]; then
+            echo "Missing to/amount from simulate.json"
+            exit 1
+          fi
+
+          export SPEND_ABI_PARAMS_JSON=$(node -e 'const fs=require("fs"); const to=fs.readFileSync(".aegis_console/to.txt","utf8").trim(); const amt=fs.readFileSync(".aegis_console/amount.txt","utf8").trim(); process.stdout.write(JSON.stringify([to, String(amt)]))')
+          echo "SPEND_ABI_PARAMS_JSON=${SPEND_ABI_PARAMS_JSON}" >> $GITHUB_ENV
+
+          npx ts-node scripts/circle/07_callSpend_vault.ts | tee .aegis_console/run07.out
+
+          CIRCLE_TX_ID=$(grep -Eo 'circleTxId:\s*[A-Za-z0-9-]+' .aegis_console/run07.out | head -n 1 | sed -E 's/circleTxId:\s*//')
+          if [ -z "${CIRCLE_TX_ID}" ]; then
+            echo "Failed to parse circleTxId from 07 stdout"
+            cat .aegis_console/run07.out
+            exit 1
+          fi
+
+          echo "CIRCLE_TX_ID=${CIRCLE_TX_ID}" >> $GITHUB_ENV
+          echo "${CIRCLE_TX_ID}" > .aegis_console/circleTxId.txt
+
+      - name: Circle 06_waitTx.ts (execute only)
+        id: run06
+        if: ${{ always() && (hashFiles('.aegis_console/should_execute.txt') != '') }}
+        continue-on-error: true
+        env:
+          CIRCLE_API_KEY: ${{ secrets.CIRCLE_API_KEY }}
+          CIRCLE_BASE_URL: ${{ secrets.CIRCLE_BASE_URL }}
+          ARC_EXPLORER_TX: ${{ secrets.ARC_EXPLORER_TX }}
+          CIRCLE_TX_ID: ${{ env.CIRCLE_TX_ID }}
+        run: |
+          SHOULD=$(cat .aegis_console/should_execute.txt 2>/dev/null || echo "false")
+          if [ "$SHOULD" != "true" ]; then
+            echo "Skip wait (should_execute=false)"
+            exit 0
+          fi
+
+          npx ts-node scripts/circle/06_waitTx.ts | tee .aegis_console/run06.out
+
+      - name: Extract txHash (execute only)
+        id: extract
+        if: ${{ always() && (hashFiles('.aegis_console/should_execute.txt') != '') }}
+        continue-on-error: true
+        env:
+          ARC_EXPLORER_TX: ${{ secrets.ARC_EXPLORER_TX }}
+        run: |
+          SHOULD=$(cat .aegis_console/should_execute.txt 2>/dev/null || echo "false")
+          if [ "$SHOULD" != "true" ]; then
+            echo "Skip extract (should_execute=false)"
+            exit 0
+          fi
+
+          # Primary pattern
+          TX_HASH=$(grep -Eo '✅ On-chain txHash:\s*0x[0-9a-fA-F]{64}' .aegis_console/run06.out | head -n 1 | sed -E 's/✅ On-chain txHash:\s*//')
+
+          # Fallback pattern
+          if [ -z "${TX_HASH}" ]; then
+            TX_HASH=$(grep -Eo 'txHash=0x[0-9a-fA-F]{64}' .aegis_console/run06.out | head -n 1 | sed -E 's/txHash=//')
+          fi
+
+          if [ -z "${TX_HASH}" ]; then
+            echo "Failed to parse txHash from 06 stdout"
+            cat .aegis_console/run06.out
+            exit 1
+          fi
+
+          EXPLORER="${ARC_EXPLORER_TX:-https://testnet.arcscan.app/tx/}"
+          ARCSCAN="${EXPLORER}${TX_HASH}"
+
+          echo "${TX_HASH}" > .aegis_console/txHash.txt
+          echo "${ARCSCAN}" > .aegis_console/arcscan.txt
+
+      # --- Build console_result.json ALWAYS (even if any step failed)
+      - name: Build console_result.json (always)
+        if: always()
+        run: |
+          node - << 'NODE'
+          const fs = require("fs");
+
+          const read = (p) => (fs.existsSync(p) ? fs.readFileSync(p, "utf8") : "");
+          const readJSON = (p) => {
+            try {
+              const t = read(p).trim();
+              if (!t) return null;
+              return JSON.parse(t);
+            } catch (e) {
+              return { _parseError: String(e), _raw: read(p).slice(0, 4000) };
+            }
+          };
+
+          const mode = read(".aegis_console/mode.txt").trim();
+          const intent = read(".aegis_console/intent.txt");
+
+          const simulate = readJSON(".aegis_console/simulate.json");
+          const validate = readJSON(".aegis_console/validate.json");
+
+          const shouldExecute = read(".aegis_console/should_execute.txt").trim() === "true";
+
+          const circleTxId = read(".aegis_console/circleTxId.txt").trim();
+          const txHash = read(".aegis_console/txHash.txt").trim();
+          const arcscan = read(".aegis_console/arcscan.txt").trim();
+
+          const simulateErr = read(".aegis_console/simulate.stderr.log").trim();
+          const validateErr = read(".aegis_console/validate.stderr.log").trim();
+
+          const res = {
+            mode,
+            intent,
+            simulate,
+            validate,
+            execute: null,
+            errors: {
+              simulateStderr: simulateErr || null,
+              validateStderr: validateErr || null,
+            },
+            meta: {
+              shouldExecute,
+              workflow: "aegis-console",
+            }
+          };
+
+          if (mode === "EXECUTE") {
+            if (!validate || validate?.status !== "APPROVED_READY") {
+              res.execute = {
+                status: "BLOCKED",
+                reason: validate?.reason || "Blocked by validation gate.",
+                message: "No execution occurred. Funds did not move."
+              };
+            } else if (!shouldExecute) {
+              res.execute = {
+                status: "BLOCKED",
+                reason: "Validation approved but execution gate did not run.",
+                message: "No execution occurred. Funds did not move."
+              };
+            } else if (txHash) {
+              res.execute = {
+                status: "APPROVED",
+                circleTxId: circleTxId || null,
+                txHash,
+                arcscan: arcscan || null
+              };
+            } else {
+              // execution attempted but no txHash parsed
+              res.execute = {
+                status: "ERROR",
+                reason: "Execution attempted but txHash could not be extracted.",
+                message: "Execution may have failed. See logs."
+              };
+            }
+          }
+
+          fs.writeFileSync("console_result.json", JSON.stringify(res, null, 2));
+          console.log("Wrote console_result.json");
+          NODE
+
+      - name: Upload console artifact (always)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: aegis-console-result
+          path: console_result.json
+          retention-days: 1
