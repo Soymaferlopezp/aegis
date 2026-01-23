@@ -492,6 +492,15 @@ jobs:
             echo "> Observational UI. Enforcement happens on-chain."
           } >> $GITHUB_STEP_SUMMARY
 
+      - name: Debug list console workspace
+        if: always()
+        run: |
+          echo "PWD=$(pwd)"
+          ls -la
+          echo "---- .aegis_console ----"
+          ls -la .aegis_console || true
+
+
       - name: Upload debug logs (always)
         if: always()
         uses: actions/upload-artifact@v4
@@ -499,4 +508,5 @@ jobs:
           name: aegis-console-debug
           path: .aegis_console
           retention-days: 1
+          include-hidden-files: true
 
