@@ -421,6 +421,8 @@ jobs:
           node - << 'NODE'
           const fs = require("fs");
 
+          const ARCSCAN_BASE = "https://testnet.arcscan.app/tx/";
+
           const p = "console_result.json";
           if (!fs.existsSync(p)) {
             console.log("No console_result.json found.");
@@ -485,7 +487,7 @@ jobs:
 
               if (exe.txHash) {
                 console.log(`- txHash:  ${exe.txHash}`);
-                console.log(`- arcscan: ${exe.arcscan ?? "-"}`);
+                console.log(`- arcscan: ${ARCSCAN_BASE}${exe.txHash}`);
               } else {
                 console.log("- Execution approved but txHash missing (unexpected).");
               }
@@ -508,6 +510,7 @@ jobs:
           console.log("Artifact: aegis-console-result / console_result.json");
           console.log("========================================");
           NODE
+
 
 
       - name: Summary (GitHub Step Summary)
