@@ -1018,3 +1018,4 @@ El **Vault contract** es quien debe tener fondos, no el agente humano.
 ⏳ Fase 3 — Diseño y Frontend
 
 ---
+
