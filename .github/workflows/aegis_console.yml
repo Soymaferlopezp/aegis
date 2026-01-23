@@ -493,14 +493,20 @@ jobs:
             echo "> Observational UI. Enforcement happens on-chain."
           } >> $GITHUB_STEP_SUMMARY
 
-      - name: Debug list console workspace
+      - name: Debug simulate logs (always)
         if: always()
         run: |
-          echo "PWD=$(pwd)"
-          ls -la
-          echo "---- .aegis_console ----"
-          ls -la .aegis_console || true
-
+          echo "---- simulate.exitcode ----"
+          cat .aegis_console/simulate.exitcode.txt || true
+          echo ""
+          echo "---- simulate.stderr (first 200 lines) ----"
+          sed -n '1,200p' .aegis_console/simulate.stderr.log || true
+          echo ""
+          echo "---- simulate.stdout (first 50 lines) ----"
+          sed -n '1,50p' .aegis_console/simulate.stdout.log || true
+          echo ""
+          echo "---- simulate.extract_error ----"
+          cat .aegis_console/simulate.extract_error.log || true
 
       - name: Upload debug logs (always)
         if: always()
