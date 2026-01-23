@@ -46,7 +46,7 @@ jobs:
       # --- SIMULATE: run CLI, extract JSON object from mixed stdout safely
       - name: Agent simulate (extract JSON from stdout)
         id: simulate
-        continue-on-error: true
+        continue-on-error: false
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GEMINI_MODEL: ${{ secrets.GEMINI_MODEL }} # optional
@@ -104,7 +104,7 @@ jobs:
       # --- VALIDATE: run CLI, extract JSON object from mixed stdout safely
       - name: Agent validate (extract JSON from stdout)
         id: validate
-        continue-on-error: true
+        continue-on-error: false
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GEMINI_MODEL: ${{ secrets.GEMINI_MODEL }} # optional
