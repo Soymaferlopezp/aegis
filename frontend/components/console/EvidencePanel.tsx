@@ -4,11 +4,32 @@ import VaultStateCard from "@/components/console/evidence/VaultStateCard";
 import DecisionCard from "@/components/console/evidence/DecisionCard";
 import ExecutionCard from "@/components/console/evidence/ExecutionCard";
 
+const EXECUTION_STATUSES = ["APPROVED", "BLOCKED", "ERROR"] as const;
+type ExecutionStatus = (typeof EXECUTION_STATUSES)[number];
+
 export default function EvidencePanel({ evidence }: { evidence: EvidenceSnapshot }) {
   const has =
     Boolean(evidence.vault?.maxPerTx || evidence.vault?.dailyLimit || evidence.vault?.spentToday) ||
     Boolean(evidence.decision?.status || evidence.decision?.reason) ||
     Boolean(evidence.execution?.txHash || evidence.execution?.message);
+
+  /**
+   * 🔒 Normalizamos execution SOLO para el UI
+   * - No mutamos evidence
+   * - No tocamos backend
+   * - Garantizamos types seguros para ExecutionCard
+   */
+  const execution =
+    evidence.execution
+      ? {
+          ...evidence.execution,
+          status: EXECUTION_STATUSES.includes(
+            evidence.execution.status as ExecutionStatus
+          )
+            ? (evidence.execution.status as ExecutionStatus)
+            : undefined,
+        }
+      : undefined;
 
   return (
     <div className="rounded-3xl border border-[var(--border)] bg-[rgba(17,24,39,0.22)]">
@@ -28,7 +49,7 @@ export default function EvidencePanel({ evidence }: { evidence: EvidenceSnapshot
           <>
             <VaultStateCard vault={evidence.vault} />
             <DecisionCard decision={evidence.decision} />
-            <ExecutionCard execution={evidence.execution} />
+            <ExecutionCard execution={execution} />
           </>
         )}
       </div>
